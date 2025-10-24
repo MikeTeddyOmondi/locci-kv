@@ -13,6 +13,26 @@ storage:
     target_file_size_base: 67108864  # 64MB
     enable_statistics: true
 
+# Raft configuration
+raft:
+  heartbeat_tick: 100
+  election_tick: 300
+  max_size_per_msg: 1048576
+  max_inflight_msgs: 256
+  check_quorum: true
+  pre_vote: true
+
+# Cluster configuration
+cluster:
+  bootstrap: false
+  peers:
+    - id: 1
+      addr: "127.0.0.1:9001"
+    - id: 2
+      addr: "127.0.0.1:9002"
+    - id: 3
+      addr: "127.0.0.1:9003"
+
 logging:
   level: "info"
   format: "json"
