@@ -50,6 +50,26 @@ thiserror = "1.0"
 # Utilities
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
+# Raft consensus
+# raft = "0.7"
+# raft-proto = "0.7"
+# # raft = { version = "0.7", features = ["protobuf-codec"] }
+# # raft-proto = { version = "0.7", features = ["bundled"] }
+# protobuf = "3.7.1"
+raft = { version = "0.7", default-features = false, features = ["prost-codec"] }
+raft-proto = { version = "0.7", default-features = false, features = ["prost-codec"] }
+
+# Networking
+tonic = { version = "0.11", features = ["transport"] }
+prost = "0.11"
+
+# slog for raft logging
+slog = "2.7"
+
+# Additional utilities
+crossbeam = "0.8"
+parking_lot = "0.12"
+
 [dev-dependencies]
 tempfile = "3.8"
 reqwest = { version = "0.11", features = ["json"] }
