@@ -403,10 +403,10 @@ impl RaftStorageAdapter {
 
     pub async fn append_entries(&self, entries: &[Entry]) -> Result<()> {
         let mut cached_entries = self.entries.write();
-        
+
         for entry in entries {
-            let key = format!("{}{}", 
-                String::from_utf8_lossy(RAFT_LOG_PREFIX), 
+            let key = format!("{}{}",
+                String::from_utf8_lossy(RAFT_LOG_PREFIX),
                 entry.index
             );
             let data = protobuf::Message::write_to_bytes(entry)
@@ -414,13 +414,13 @@ impl RaftStorageAdapter {
             self.kv_storage.put(key.as_bytes(), &data).await?;
             cached_entries.push(entry.clone());
         }
-        
+
         Ok(())
     }
 
     fn get_entry(&self, idx: u64) -> raft::Result<Entry> {
         let entries = self.entries.read();
-        
+
         if let Some(entry) = entries.iter().find(|e| e.index == idx) {
             return Ok(entry.clone());
         }
@@ -447,20 +447,20 @@ impl RaftStorage for RaftStorageAdapter {
     ) -> raft::Result<Vec<Entry>> {
         let entries = self.entries.read();
         let max_size = max_size.into();
-        
+
         let mut result = Vec::new();
         let mut total_size = 0u64;
 
         for entry in entries.iter() {
             if entry.index >= low && entry.index < high {
                 let entry_size = protobuf::Message::compute_size(entry) as u64;
-                
+
                 if let Some(max) = max_size {
                     if total_size + entry_size > max && !result.is_empty() {
                         break;
                     }
                 }
-                
+
                 total_size += entry_size;
                 result.push(entry.clone());
             }
@@ -580,10 +580,10 @@ impl RaftNode {
     /// Propose a change to the Raft cluster
     pub async fn propose(&self, proposal: Proposal) -> Result<()> {
         let data = bincode::serialize(&proposal)?;
-        
+
         // Create a channel for the response
         let (tx, rx) = tokio::sync::oneshot::channel();
-        
+
         let proposal_id = {
             let mut idx = self.proposal_index.write();
             *idx += 1;
@@ -650,7 +650,7 @@ impl RaftNode {
     /// Check if there's a ready state and process it
     pub async fn handle_ready(&self) -> Result<Vec<RaftMessage>> {
         let mut node = self.raw_node.write();
-        
+
         if !node.has_ready() {
             return Ok(Vec::new());
         }
@@ -662,9 +662,9 @@ impl RaftNode {
         if !ready.entries().is_empty() {
             let storage = node.raft.raft_log.store.clone();
             drop(node); // Release lock before async operation
-            
+
             storage.append_entries(ready.entries()).await?;
-            
+
             node = self.raw_node.write();
         }
 
@@ -679,14 +679,14 @@ impl RaftNode {
                 // Deserialize and apply proposal
                 if let Ok(proposal) = bincode::deserialize::<Proposal>(&entry.data) {
                     drop(node); // Release lock before async operation
-                    
+
                     let result = self.state_machine.apply(proposal).await;
-                    
+
                     // Notify pending proposals
                     if let Some(pending) = self.pending_proposals.write().remove(&entry.index) {
                         let _ = pending.response_tx.send(result);
                     }
-                    
+
                     node = self.raw_node.write();
                 }
             }
@@ -697,9 +697,9 @@ impl RaftNode {
             let storage = node.raft.raft_log.store.clone();
             let hs_clone = hs.clone();
             drop(node);
-            
+
             storage.save_hard_state(&hs_clone).await?;
-            
+
             node = self.raw_node.write();
         }
 
@@ -708,7 +708,7 @@ impl RaftNode {
 
         // Handle light ready (messages to send)
         let light_messages = light_rd.take_messages();
-        
+
         Ok([messages, light_messages].concat())
     }
 }
@@ -765,7 +765,7 @@ pub struct NetworkTransport {
 impl NetworkTransport {
     pub fn new(node_id: u64, peers: Vec<PeerConfig>) -> Self {
         let (message_tx, message_rx) = mpsc::unbounded_channel();
-        
+
         let peer_map: HashMap<u64, PeerConfig> = peers
             .into_iter()
             .map(|p| (p.id, p))
@@ -782,7 +782,7 @@ impl NetworkTransport {
     /// Send a Raft message to a peer
     pub async fn send_message(&self, msg: RaftMessage) -> Result<()> {
         let to = msg.to;
-        
+
         if to == self.node_id {
             // Message to self, just queue it
             self.message_tx.send(msg)
@@ -793,7 +793,7 @@ impl NetworkTransport {
         // In a real implementation, this would send over network
         // For now, we'll just log it
         debug!("Would send message to peer {}: {:?}", to, msg.msg_type());
-        
+
         Ok(())
     }
 
@@ -873,7 +873,7 @@ impl Server {
     /// Enable Raft consensus
     pub async fn with_raft(mut self) -> Result<Self> {
         info!("Initializing Raft consensus...");
-        
+
         // Create network transport
         let network = Arc::new(NetworkTransport::new(
             self.config.server.id,
@@ -901,7 +901,7 @@ impl Server {
 
     pub async fn start(self) -> Result<()> {
         let addr = self.config.server.bind_addr.clone();
-        
+
         info!("Starting Locci KV server on {}", addr);
         info!("Server ID: {}", self.config.server.id);
         info!("Data directory: {:?}", self.config.server.data_dir);
@@ -915,7 +915,7 @@ impl Server {
         if self.raft_enabled {
             let raft_node_clone = raft_node.clone().unwrap();
             let network_clone = network.clone().unwrap();
-            
+
             tokio::spawn(async move {
                 Self::raft_event_loop(raft_node_clone, network_clone).await;
             });
@@ -930,15 +930,15 @@ impl Server {
     /// Raft event loop - processes Raft state machine
     async fn raft_event_loop(raft_node: Arc<RaftNode>, network: Arc<NetworkTransport>) {
         info!("Starting Raft event loop");
-        
+
         let mut tick_interval = tokio::time::interval(Duration::from_millis(100));
-        
+
         loop {
             tokio::select! {
                 _ = tick_interval.tick() => {
                     // Tick the Raft node
                     raft_node.tick();
-                    
+
                     // Process ready state
                     match raft_node.handle_ready().await {
                         Ok(messages) => {
@@ -954,7 +954,7 @@ impl Server {
                         }
                     }
                 }
-                
+
                 Some(msg) = network.recv_message() => {
                     // Process incoming Raft message
                     debug!("Received Raft message: {:?}", msg.msg_type());
@@ -1071,7 +1071,7 @@ pub async fn start_http_server(
     storage: Arc<dyn Storage>,
     raft_node: Option<Arc<RaftNode>>,  // 🆕 NEW
 ) -> Result<()> {
-    let state = AppState { 
+    let state = AppState {
         storage,
         raft_node,  // 🆕 NEW
     };
@@ -1161,7 +1161,7 @@ async fn put_key(
             key: key.as_bytes().to_vec(),
             value: req.value.as_bytes().to_vec(),
         };
-        
+
         raft_node.propose(proposal).await?;
     } else {
         // Direct write (Phase 1 mode)
@@ -1193,7 +1193,7 @@ async fn delete_key(
         let proposal = Proposal::Delete {
             key: key.as_bytes().to_vec(),
         };
-        
+
         raft_node.propose(proposal).await?;
     } else {
         // Direct delete (Phase 1 mode)
@@ -1207,7 +1207,7 @@ async fn delete_key(
 
 async fn list_keys(State(state): State<AppState>) -> Result<Json<ListResponse>> {
     let keys_bytes = state.storage.list_keys(None).await?;
-    
+
     let keys: Vec<String> = keys_bytes
         .into_iter()
         .filter_map(|k| String::from_utf8(k).ok())
@@ -1291,7 +1291,7 @@ enum Commands {
         #[arg(long)]
         bootstrap: bool,
     },
-    
+
     /// Run in standalone mode (single node, no Raft)
     Standalone,
 }
@@ -1321,18 +1321,18 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Some(Commands::Start { bootstrap }) => {
             tracing::info!("Starting Locci KV server...");
-            
+
             // Update bootstrap flag from CLI
             config.cluster.bootstrap = bootstrap;
-            
+
             // Create server
             let mut server = Server::new(config)?;
-            
+
             // Enable Raft if requested
             if cli.enable_raft {
                 server = server.with_raft().await?;
             }
-            
+
             server.start().await?;
         }
         Some(Commands::Standalone) | None => {
@@ -1373,6 +1373,7 @@ curl http://localhost:8080/raft/status
 Create three config files:
 
 **node1.yaml**:
+
 ```yaml
 server:
   id: 1
@@ -1544,13 +1545,14 @@ The integration is complete! The system now supports both standalone mode (Phase
 
 ---
 
-## Notes 
+## Notes
 
 Perfect! I've completed the Phase 2 Raft integration guide. Here's what I've delivered:
 
 ## 📋 Complete Phase 2 Implementation
 
 ### ✏️ Modified Files (7 files from Phase 1):
+
 1. **config.rs** - Added Raft & cluster configuration structs
 2. **error.rs** - Added `NotLeader`, `ProposalTimeout`, `Raft`, `Network` errors
 3. **server.rs** - Added `with_raft()` method and Raft event loop
@@ -1559,6 +1561,7 @@ Perfect! I've completed the Phase 2 Raft integration guide. Here's what I've del
 6. **main.rs** - Added `--enable-raft` and `--bootstrap` CLI flags
 
 ### 🆕 New Files (7 files):
+
 1. **src/raft/mod.rs** - Module exports
 2. **src/raft/node.rs** - Core Raft node with proposal handling
 3. **src/raft/storage.rs** - RocksDB adapter for Raft's Storage trait
@@ -1574,7 +1577,7 @@ Perfect! I've completed the Phase 2 Raft integration guide. Here's what I've del
 ✅ **Consensus Writes** - All writes go through Raft consensus  
 ✅ **Proposal System** - Async proposals with timeout handling  
 ✅ **Status Endpoint** - `/raft/status` shows cluster state  
-✅ **NotLeader Errors** - Followers reject writes with leader hint  
+✅ **NotLeader Errors** - Followers reject writes with leader hint
 
 ## 🚀 Usage Examples
 
@@ -1598,6 +1601,7 @@ curl -X POST http://localhost:8080/kv/mykey \
 ## 📍 Integration Points
 
 The guide clearly marks:
+
 - **🆕 NEW** - Brand new code added for Phase 2
 - **✏️ Updated** - Existing Phase 1 files that were modified
 - **Exact locations** - Shows where each change goes in existing files
@@ -1612,3 +1616,213 @@ All changes are designed to be **non-breaking** - Phase 1 functionality remains 
 
 ---
 
+# Warp Agent Implmentations
+
+## Summary
+
+Phase 2 Raft integration has been successfully implemented! The system now supports both standalone mode (Phase 1) and distributed consensus mode (Phase 2).
+
+## What Was Implemented
+
+### 🆕 New Files Created (7 files)
+
+1. **src/raft/mod.rs** - Raft module exports
+2. **src/raft/proposal.rs** - Proposal types (Put/Delete)
+3. **src/raft/state_machine.rs** - State machine that applies committed entries
+4. **src/raft/storage.rs** - RocksDB adapter for Raft's Storage trait
+5. **src/raft/node.rs** - Core Raft node with proposal handling
+6. **src/network/mod.rs** - Network module exports
+7. **src/network/transport.rs** - Message transport (simplified for single-node testing)
+
+### ✏️ Modified Files (7 files from Phase 1)
+
+1. **Cargo.toml** - Moved Raft dependencies to correct section
+2. **src/config.rs** - Added RaftConfig, PeerConfig, and ClusterConfig structs
+3. **src/error.rs** - Added Raft-specific errors (NotLeader, ProposalTimeout, Raft, Network, Protobuf)
+4. **src/server.rs** - Added `with_raft()` method and Raft event loop
+5. **src/api/http.rs** - Modified PUT/DELETE to use Raft proposals when enabled, added `/raft/status` endpoint
+6. **src/lib.rs** - Exported `raft` and `network` modules
+7. **src/main.rs** - Added `--enable-raft` and `--bootstrap` CLI flags
+8. **config.yaml** - Added Raft and cluster configuration sections
+
+## Key Features
+
+✅ **Backward Compatible** - Phase 1 standalone mode works without `--enable-raft`  
+✅ **Leader Election** - Automatic leader election with Raft consensus  
+✅ **Consensus Writes** - All writes go through Raft when enabled  
+✅ **Proposal System** - Async proposals with timeout handling  
+✅ **Status Endpoint** - `/raft/status` shows cluster state  
+✅ **NotLeader Errors** - Followers reject writes with leader hint  
+✅ **Direct Reads** - Reads go directly to storage (can be enhanced later)
+
+## How to Use
+
+### Phase 1 Mode (Standalone - No Raft)
+
+```bash
+# Build
+cargo build --release
+
+# Run in standalone mode
+./target/release/locci-kv standalone
+# or
+./target/release/locci-kv start
+```
+
+### Phase 2 Mode (With Raft Consensus)
+
+```bash
+# Bootstrap a new Raft cluster
+./target/release/locci-kv --enable-raft start --bootstrap
+
+# Check Raft status
+curl http://localhost:8080/raft/status
+# Response: {"enabled":true,"is_leader":true,"leader_id":1}
+```
+
+### Testing Phase 2
+
+```bash
+# 1. Start server with Raft
+./target/release/locci-kv --enable-raft start --bootstrap
+
+# 2. Check Raft status
+curl http://localhost:8080/raft/status
+
+# 3. Write data (must be leader)
+curl -X POST http://localhost:8080/kv/test \
+  -H "Content-Type: application/json" \
+  -d '{"value": "Hello Raft!"}'
+
+# 4. Read data
+curl http://localhost:8080/kv/test
+
+# 5. List keys
+curl http://localhost:8080/keys
+
+# 6. Delete key
+curl -X DELETE http://localhost:8080/kv/test
+```
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | Health check |
+| GET | `/health` | Health check |
+| GET | `/stats` | Storage statistics |
+| GET | `/raft/status` | **NEW** - Raft cluster status |
+| GET | `/kv/:key` | Get value by key |
+| POST | `/kv/:key` | Put key-value (via Raft if enabled) |
+| DELETE | `/kv/:key` | Delete key (via Raft if enabled) |
+| GET | `/keys` | List all keys |
+
+## Configuration
+
+The `config.yaml` now includes Raft configuration:
+
+```yaml
+raft:
+  heartbeat_tick: 100
+  election_tick: 300
+  max_size_per_msg: 1048576
+  max_inflight_msgs: 256
+  check_quorum: true
+  pre_vote: true
+
+cluster:
+  bootstrap: false
+  peers:
+    - id: 1
+      addr: "127.0.0.1:9001"
+    - id: 2
+      addr: "127.0.0.1:9002"
+    - id: 3
+      addr: "127.0.0.1:9003"
+```
+
+## CLI Flags
+
+```bash
+locci-kv [OPTIONS] [COMMAND]
+
+Options:
+  -c, --config <CONFIG>           Path to config file
+      --id <ID>                   Server ID
+      --bind-addr <BIND_ADDR>     Server bind address
+      --data-dir <DATA_DIR>       Data directory
+      --log-level <LOG_LEVEL>     Log level [default: info]
+      --enable-raft               Enable Raft consensus  # NEW
+
+Commands:
+  start         Start the Locci KV server
+    --bootstrap   Bootstrap a new Raft cluster         # NEW
+  standalone    Run in standalone mode (no Raft)
+```
+
+## Error Responses
+
+When Raft is enabled:
+
+- **503 Service Unavailable** - "Not leader. Current leader: Some(2)" - Follower received a write
+- **408 Request Timeout** - "Proposal timeout" - Proposal didn't commit within 5 seconds
+- **404 Not Found** - "Key not found: mykey" - Key doesn't exist
+- **400 Bad Request** - "Invalid operation: ..." - Bad request data
+
+## What's Next (Phase 3)
+
+The current implementation is ready for:
+
+1. **Real Network Transport** - Replace simplified transport with gRPC/TCP for multi-node clusters
+2. **Snapshots** - Implement snapshot/restore for log compaction
+3. **Dynamic Membership** - Add/remove nodes dynamically
+4. **Linearizable Reads** - Implement read index or lease-based reads
+5. **Monitoring** - Add Prometheus metrics for Raft health
+
+## Build and Test
+
+```bash
+# Build the project
+cargo build --release
+
+# Run tests
+cargo test
+
+# Run with Raft enabled
+./target/release/locci-kv --enable-raft start --bootstrap
+
+# Check status in another terminal
+curl http://localhost:8080/raft/status
+curl http://localhost:8080/health
+```
+
+## Notes
+
+- The current network transport is simplified for single-node testing
+- Multi-node clusters will work once real network transport is implemented
+- All Phase 1 functionality remains intact when running without `--enable-raft`
+- Raft consensus only applies to writes (PUT/DELETE), reads go directly to storage
+
+## Architecture
+
+```
+┌──────────────────────────┐
+│      HTTP API (Axum)     │
+├──────────────────────────┤
+│  Raft Node (Consensus)   │  ← NEW
+├──────────────────────────┤
+│   Storage Interface      │
+├──────────────────────────┤
+│  RocksDB Storage Backend │
+├──────────────────────────┤
+│ Network Transport Layer  │  ← NEW
+└──────────────────────────┘
+```
+
+---
+
+**Status: Phase 2 Complete ✅**
+
+The system is now ready for single-node Raft testing and can be extended to multi-node clusters in Phase 3.
+
+---
