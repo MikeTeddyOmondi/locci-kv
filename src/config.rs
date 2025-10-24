@@ -7,6 +7,8 @@ pub struct Config {
     pub server: ServerConfig,
     pub storage: StorageConfig,
     pub logging: LoggingConfig,
+    pub raft: RaftConfig,
+    pub cluster: ClusterConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +37,28 @@ pub struct RocksDBConfig {
 pub struct LoggingConfig {
     pub level: String,
     pub format: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaftConfig {
+    pub heartbeat_tick: usize,
+    pub election_tick: usize,
+    pub max_size_per_msg: u64,
+    pub max_inflight_msgs: usize,
+    pub check_quorum: bool,
+    pub pre_vote: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerConfig {
+    pub id: u64,
+    pub addr: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterConfig {
+    pub peers: Vec<PeerConfig>,
+    pub bootstrap: bool,
 }
 
 impl Config {
@@ -90,6 +114,23 @@ impl Default for Config {
             logging: LoggingConfig {
                 level: "info".to_string(),
                 format: "json".to_string(),
+            },
+            raft: RaftConfig {
+                heartbeat_tick: 100,
+                election_tick: 300,
+                max_size_per_msg: 1024 * 1024,
+                max_inflight_msgs: 256,
+                check_quorum: true,
+                pre_vote: true,
+            },
+            cluster: ClusterConfig {
+                peers: vec![
+                    PeerConfig {
+                        id: 1,
+                        addr: "127.0.0.1:9001".to_string(),
+                    },
+                ],
+                bootstrap: false,
             },
         }
     }

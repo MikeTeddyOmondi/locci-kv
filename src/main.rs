@@ -24,8 +24,12 @@ struct Cli {
     data_dir: Option<PathBuf>,
 
     /// Log level (trace, debug, info, warn, error)
-    #[arg(long, env = "LOCCI_KV_LOG_LEVEL", default_value = "info")]
+    #[arg(long, env = "LOCCI_LOG_LEVEL", default_value = "info")]
     log_level: String,
+
+    /// Enable Raft consensus (default: false for Phase 1 compatibility)
+    #[arg(long, env = "LOCCI_ENABLE_RAFT")]
+    enable_raft: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -34,9 +38,13 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Start the Locci KV server
-    Start,
+    Start {
+        /// Bootstrap a new Raft cluster
+        #[arg(long)]
+        bootstrap: bool,
+    },
     
-    /// Run in standalone mode (single node)
+    /// Run in standalone mode (single node, no Raft)
     Standalone,
 }
 
@@ -62,12 +70,26 @@ async fn main() -> anyhow::Result<()> {
     // Merge CLI overrides
     config.merge_overrides(cli.id, cli.bind_addr, cli.data_dir);
 
-    // Create and start server
-    let server = Server::new(config)?;
-
     match cli.command {
-        Some(Commands::Start) | Some(Commands::Standalone) | None => {
-            tracing::info!("Initialising Locci KV server...");
+        Some(Commands::Start { bootstrap }) => {
+            tracing::info!("Starting Locci KV server...");
+            
+            // Update bootstrap flag from CLI
+            config.cluster.bootstrap = bootstrap;
+            
+            // Create server
+            let mut server = Server::new(config)?;
+            
+            // Enable Raft if requested
+            if cli.enable_raft {
+                server = server.with_raft().await?;
+            }
+            
+            server.start().await?;
+        }
+        Some(Commands::Standalone) | None => {
+            tracing::info!("Starting Locci KV in standalone mode (no Raft)");
+            let server = Server::new(config)?;
             server.start().await?;
         }
     }

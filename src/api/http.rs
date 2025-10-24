@@ -10,11 +10,13 @@ use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 use crate::error::{LocciKVError, Result};
+use crate::raft::{Proposal, RaftNode};
 use crate::storage::Storage;
 
 #[derive(Clone)]
 struct AppState {
     storage: Arc<dyn Storage>,
+    raft_node: Option<Arc<RaftNode>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,12 +46,27 @@ struct ListResponse {
     count: usize,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct RaftStatusResponse {
+    enabled: bool,
+    is_leader: bool,
+    leader_id: Option<u64>,
+}
+
 // Convert LocciKVError to HTTP response
 impl IntoResponse for LocciKVError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
             LocciKVError::KeyNotFound(key) => (StatusCode::NOT_FOUND, format!("Key not found: {}", key)),
             LocciKVError::InvalidOperation(msg) => (StatusCode::BAD_REQUEST, msg),
+            LocciKVError::NotLeader(leader_id) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("Not leader. Current leader: {:?}", leader_id),
+            ),
+            LocciKVError::ProposalTimeout => (
+                StatusCode::REQUEST_TIMEOUT,
+                "Proposal timeout".to_string(),
+            ),
             _ => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
 
@@ -61,13 +78,21 @@ impl IntoResponse for LocciKVError {
     }
 }
 
-pub async fn start_http_server(addr: String, storage: Arc<dyn Storage>) -> Result<()> {
-    let state = AppState { storage };
+pub async fn start_http_server(
+    addr: String,
+    storage: Arc<dyn Storage>,
+    raft_node: Option<Arc<RaftNode>>,
+) -> Result<()> {
+    let state = AppState { 
+        storage,
+        raft_node,
+    };
 
     let app = Router::new()
         .route("/", get(health_check))
         .route("/health", get(health_check))
         .route("/stats", get(get_stats))
+        .route("/raft/status", get(raft_status))
         .route("/kv/:key", get(get_key))
         .route("/kv/:key", post(put_key))
         .route("/kv/:key", delete(delete_key))
@@ -92,6 +117,22 @@ async fn health_check() -> Json<SuccessResponse> {
     })
 }
 
+async fn raft_status(State(state): State<AppState>) -> Json<RaftStatusResponse> {
+    if let Some(raft_node) = &state.raft_node {
+        Json(RaftStatusResponse {
+            enabled: true,
+            is_leader: raft_node.is_leader(),
+            leader_id: raft_node.leader_id(),
+        })
+    } else {
+        Json(RaftStatusResponse {
+            enabled: false,
+            is_leader: false,
+            leader_id: None,
+        })
+    }
+}
+
 async fn get_stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>> {
     let stats = state.storage.stats().await?;
     Ok(Json(serde_json::json!(stats)))
@@ -101,6 +142,7 @@ async fn get_key(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<GetResponse>> {
+    // Reads can go directly to storage (linearizable reads would need leader check)
     let value = state.storage.get(key.as_bytes()).await?
         .ok_or_else(|| LocciKVError::KeyNotFound(key.clone()))?;
 
@@ -118,7 +160,24 @@ async fn put_key(
     Path(key): Path<String>,
     Json(req): Json<PutRequest>,
 ) -> Result<Json<SuccessResponse>> {
-    state.storage.put(key.as_bytes(), req.value.as_bytes()).await?;
+    // Use Raft if enabled
+    if let Some(raft_node) = &state.raft_node {
+        // Check if we're the leader
+        if !raft_node.is_leader() {
+            return Err(LocciKVError::NotLeader(raft_node.leader_id()));
+        }
+
+        // Propose through Raft
+        let proposal = Proposal::Put {
+            key: key.as_bytes().to_vec(),
+            value: req.value.as_bytes().to_vec(),
+        };
+        
+        raft_node.propose(proposal).await?;
+    } else {
+        // Direct write (Phase 1 mode)
+        state.storage.put(key.as_bytes(), req.value.as_bytes()).await?;
+    }
 
     Ok(Json(SuccessResponse {
         message: format!("Key '{}' stored successfully", key),
@@ -134,7 +193,23 @@ async fn delete_key(
         return Err(LocciKVError::KeyNotFound(key));
     }
 
-    state.storage.delete(key.as_bytes()).await?;
+    // Use Raft if enabled
+    if let Some(raft_node) = &state.raft_node {
+        // Check if we're the leader
+        if !raft_node.is_leader() {
+            return Err(LocciKVError::NotLeader(raft_node.leader_id()));
+        }
+
+        // Propose through Raft
+        let proposal = Proposal::Delete {
+            key: key.as_bytes().to_vec(),
+        };
+        
+        raft_node.propose(proposal).await?;
+    } else {
+        // Direct delete (Phase 1 mode)
+        state.storage.delete(key.as_bytes()).await?;
+    }
 
     Ok(Json(SuccessResponse {
         message: format!("Key '{}' deleted successfully", key),
