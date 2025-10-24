@@ -1,0 +1,23 @@
+## API Usage
+
+### Health Check
+curl http://localhost:8080/health
+
+### Put a key-value pair
+curl -X POST http://localhost:8080/kv/foo \
+  -H "Content-Type: application/json" \
+  -d '{"value": "bar"}'
+
+### Get a value
+curl http://localhost:8080/kv/foo
+
+### Delete a key
+curl -X DELETE http://localhost:8080/kv/foo
+
+### List all keys
+curl http://localhost:8080/keys
+
+### Get storage statistics
+curl http://localhost:8080/stats
+
+### ____

@@ -1,0 +1,55 @@
+[package]
+name = "locci-kv"
+version = "0.1.0"
+edition = "2021"
+authors = ["Locci Cloud"]
+description = "A distributed key-value store built on Raft"
+license = "Apache-2.0"
+
+[[bin]]
+name = "locci-kv"
+path = "src/main.rs"
+
+[lib]
+name = "locci_kv"
+path = "src/lib.rs"
+
+[dependencies]
+dashmap = "5.5"
+
+# CLI and configuration
+clap = { version = "4.4", features = ["derive", "env"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+
+# Storage
+rocksdb = { version = "0.22", default-features = false, features = ["snappy"] }
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+async-trait = "0.1"
+
+# HTTP server
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+
+# Serialization
+bincode = "1.3"
+bytes = "1.5"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Utilities
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3.8"
+reqwest = { version = "0.11", features = ["json"] }
