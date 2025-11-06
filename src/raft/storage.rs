@@ -73,10 +73,10 @@
 
 //     pub async fn append_entries(&self, entries: &[Entry]) -> Result<()> {
 //         let mut cached_entries = self.entries.write();
-        
+
 //         for entry in entries {
-//             let key = format!("{}{}", 
-//                 String::from_utf8_lossy(RAFT_LOG_PREFIX), 
+//             let key = format!("{}{}",
+//                 String::from_utf8_lossy(RAFT_LOG_PREFIX),
 //                 entry.index
 //             );
 //             let data = protobuf::Message::write_to_bytes(entry)
@@ -84,13 +84,13 @@
 //             self.kv_storage.put(key.as_bytes(), &data).await?;
 //             cached_entries.push(entry.clone());
 //         }
-        
+
 //         Ok(())
 //     }
 
 //     fn get_entry(&self, idx: u64) -> raft::Result<Entry> {
 //         let entries = self.entries.read();
-        
+
 //         if let Some(entry) = entries.iter().find(|e| e.index == idx) {
 //             return Ok(entry.clone());
 //         }
@@ -117,20 +117,20 @@
 //     ) -> raft::Result<Vec<Entry>> {
 //         let entries = self.entries.read();
 //         let max_size = max_size.into();
-        
+
 //         let mut result = Vec::new();
 //         let mut total_size = 0u64;
 
 //         for entry in entries.iter() {
 //             if entry.index >= low && entry.index < high {
 //                 let entry_size = protobuf::Message::compute_size(entry) as u64;
-                
+
 //                 if let Some(max) = max_size {
 //                     if total_size + entry_size > max && !result.is_empty() {
 //                         break;
 //                     }
 //                 }
-                
+
 //                 total_size += entry_size;
 //                 result.push(entry.clone());
 //             }
@@ -252,10 +252,10 @@
 
 //     pub async fn append_entries(&self, entries: &[Entry]) -> Result<()> {
 //         let mut cached_entries = self.entries.write();
-        
+
 //         for entry in entries {
-//             let key = format!("{}{}", 
-//                 String::from_utf8_lossy(RAFT_LOG_PREFIX), 
+//             let key = format!("{}{}",
+//                 String::from_utf8_lossy(RAFT_LOG_PREFIX),
 //                 entry.index
 //             );
 //             // CHANGED: Use prost encode
@@ -264,13 +264,13 @@
 //             self.kv_storage.put(key.as_bytes(), &buf).await?;
 //             cached_entries.push(entry.clone());
 //         }
-        
+
 //         Ok(())
 //     }
 
 //     fn get_entry(&self, idx: u64) -> raft::Result<Entry> {
 //         let entries = self.entries.read();
-        
+
 //         if let Some(entry) = entries.iter().find(|e| e.index == idx) {
 //             return Ok(entry.clone());
 //         }
@@ -298,7 +298,7 @@
 //     ) -> raft::Result<Vec<Entry>> {
 //         let entries = self.entries.read();
 //         let max_size = max_size.into();
-        
+
 //         let mut result = Vec::new();
 //         let mut total_size = 0u64;
 
@@ -306,13 +306,13 @@
 //             if entry.index >= low && entry.index < high {
 //                 // CHANGED: Use prost encoded_len
 //                 let entry_size = entry.encoded_len() as u64;
-                
+
 //                 if let Some(max) = max_size {
 //                     if total_size + entry_size > max && !result.is_empty() {
 //                         break;
 //                     }
 //                 }
-                
+
 //                 total_size += entry_size;
 //                 result.push(entry.clone());
 //             }
@@ -429,25 +429,55 @@ impl RaftStorageAdapter {
     }
 
     pub async fn append_entries(&self, entries: &[Entry]) -> Result<()> {
-        let mut cached_entries = self.entries.write();
-        
+        // Prepare all the data BEFORE acquiring the lock
+        let mut entries_to_save = Vec::new();
+
         for entry in entries {
-            let key = format!("{}{}", 
-                String::from_utf8_lossy(RAFT_LOG_PREFIX), 
+            let key = format!(
+                "{}{}",
+                String::from_utf8_lossy(RAFT_LOG_PREFIX),
                 entry.index
             );
             let mut buf = Vec::with_capacity(entry.encoded_len());
             entry.encode(&mut buf)?;
-            self.kv_storage.put(key.as_bytes(), &buf).await?;
-            cached_entries.push(entry.clone());
+            entries_to_save.push((key, buf, entry.clone()));
         }
-        
+
+        // Now do all the async storage operations WITHOUT holding the lock
+        for (key, buf, _) in &entries_to_save {
+            self.kv_storage.put(key.as_bytes(), buf).await?;
+        }
+
+        // ONLY NOW acquire the lock and update the in-memory cache
+        {
+            let mut cached_entries = self.entries.write();
+            for (_, _, entry) in entries_to_save {
+                cached_entries.push(entry);
+            }
+        } // Lock is dropped here
+
         Ok(())
     }
+    // pub async fn append_entries(&self, entries: &[Entry]) -> Result<()> {
+    //     let mut cached_entries = self.entries.write();
+
+    //     for entry in entries {
+    //         let key = format!("{}{}",
+    //             String::from_utf8_lossy(RAFT_LOG_PREFIX),
+    //             entry.index
+    //         );
+    //         let mut buf = Vec::with_capacity(entry.encoded_len());
+    //         entry.encode(&mut buf)?;
+    //         self.kv_storage.put(key.as_bytes(), &buf).await?;
+    //         cached_entries.push(entry.clone());
+    //     }
+
+    //     Ok(())
+    // }
 
     fn get_entry(&self, idx: u64) -> raft::Result<Entry> {
         let entries = self.entries.read();
-        
+
         if let Some(entry) = entries.iter().find(|e| e.index == idx) {
             return Ok(entry.clone());
         }
@@ -475,20 +505,20 @@ impl RaftStorage for RaftStorageAdapter {
     ) -> raft::Result<Vec<Entry>> {
         let entries = self.entries.read();
         let max_size = max_size.into();
-        
+
         let mut result = Vec::new();
         let mut total_size = 0u64;
 
         for entry in entries.iter() {
             if entry.index >= low && entry.index < high {
                 let entry_size = entry.encoded_len() as u64;
-                
+
                 if let Some(max) = max_size {
                     if total_size + entry_size > max && !result.is_empty() {
                         break;
                     }
                 }
-                
+
                 total_size += entry_size;
                 result.push(entry.clone());
             }
