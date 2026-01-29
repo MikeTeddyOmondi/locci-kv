@@ -376,20 +376,78 @@ pub struct RaftStorageAdapter {
     hard_state: Arc<RwLock<HardState>>,
     conf_state: Arc<RwLock<ConfState>>,
     entries: Arc<RwLock<Vec<Entry>>>,
+    /// Snapshot metadata index - used for index calculations when entries are empty
+    snapshot_index: Arc<RwLock<u64>>,
+    /// Snapshot metadata term - used for term lookups at snapshot index
+    snapshot_term: Arc<RwLock<u64>>,
 }
 
 impl RaftStorageAdapter {
     pub async fn new(kv_storage: Arc<dyn KVStorage>) -> Result<Self> {
+        Self::new_inner(kv_storage, None).await
+    }
+
+    /// Create storage with bootstrap - initializes ConfState with voters if not already set
+    pub async fn new_with_bootstrap(
+        kv_storage: Arc<dyn KVStorage>,
+        voter_ids: Vec<u64>,
+    ) -> Result<Self> {
+        Self::new_inner(kv_storage, Some(voter_ids)).await
+    }
+
+    async fn new_inner(
+        kv_storage: Arc<dyn KVStorage>,
+        bootstrap_voters: Option<Vec<u64>>,
+    ) -> Result<Self> {
         let hard_state = Self::load_hard_state(&kv_storage).await?;
-        let conf_state = Self::load_conf_state(&kv_storage).await?;
-        let entries = Vec::new();
+        let mut conf_state = Self::load_conf_state(&kv_storage).await?;
+        let entries = Self::load_entries(&kv_storage).await?;
+
+        // If bootstrapping and conf_state is empty, initialize voters
+        if let Some(voters) = bootstrap_voters {
+            if conf_state.voters.is_empty() {
+                conf_state.voters = voters;
+                // Persist the initial conf_state
+                let adapter = Self {
+                    kv_storage: kv_storage.clone(),
+                    hard_state: Arc::new(RwLock::new(hard_state.clone())),
+                    conf_state: Arc::new(RwLock::new(conf_state.clone())),
+                    entries: Arc::new(RwLock::new(entries.clone())),
+                    snapshot_index: Arc::new(RwLock::new(0)),
+                    snapshot_term: Arc::new(RwLock::new(0)),
+                };
+                adapter.save_conf_state(&conf_state).await?;
+                return Ok(adapter);
+            }
+        }
 
         Ok(Self {
             kv_storage,
             hard_state: Arc::new(RwLock::new(hard_state)),
             conf_state: Arc::new(RwLock::new(conf_state)),
             entries: Arc::new(RwLock::new(entries)),
+            // Initialize snapshot metadata to 0 - this means first_index=1, last_index=0 for empty log
+            snapshot_index: Arc::new(RwLock::new(0)),
+            snapshot_term: Arc::new(RwLock::new(0)),
         })
+    }
+
+    /// Load all Raft log entries from storage on startup
+    async fn load_entries(storage: &Arc<dyn KVStorage>) -> Result<Vec<Entry>> {
+        let keys = storage.list_keys(Some(RAFT_LOG_PREFIX)).await?;
+        let mut entries = Vec::new();
+
+        for key in keys {
+            if let Some(data) = storage.get(&key).await? {
+                let entry = Entry::decode(Bytes::from(data))?;
+                entries.push(entry);
+            }
+        }
+
+        // Sort by index to ensure correct order
+        entries.sort_by_key(|e| e.index);
+
+        Ok(entries)
     }
 
     async fn load_hard_state(storage: &Arc<dyn KVStorage>) -> Result<HardState> {
@@ -532,24 +590,40 @@ impl RaftStorage for RaftStorageAdapter {
     }
 
     fn term(&self, idx: u64) -> raft::Result<u64> {
+        let snapshot_index = *self.snapshot_index.read();
+        let snapshot_term = *self.snapshot_term.read();
+
+        // If requesting term at snapshot index, return snapshot term
+        if idx == snapshot_index {
+            return Ok(snapshot_term);
+        }
+
+        // If index is before snapshot, it's been compacted
+        if idx < snapshot_index {
+            return Err(raft::Error::Store(StorageError::Compacted));
+        }
+
+        // Otherwise look up in entries
         let entry = self.get_entry(idx)?;
         Ok(entry.term)
     }
 
     fn first_index(&self) -> raft::Result<u64> {
         let entries = self.entries.read();
-        entries
-            .first()
-            .map(|e| e.index)
-            .ok_or(raft::Error::Store(StorageError::Unavailable))
+        match entries.first() {
+            Some(e) => Ok(e.index),
+            // When entries are empty, first available index is snapshot_index + 1
+            None => Ok(*self.snapshot_index.read() + 1),
+        }
     }
 
     fn last_index(&self) -> raft::Result<u64> {
         let entries = self.entries.read();
-        entries
-            .last()
-            .map(|e| e.index)
-            .ok_or(raft::Error::Store(StorageError::Unavailable))
+        match entries.last() {
+            Some(e) => Ok(e.index),
+            // When entries are empty, last index is the snapshot index
+            None => Ok(*self.snapshot_index.read()),
+        }
     }
 
     fn snapshot(&self, request_index: u64, _to: u64) -> raft::Result<Snapshot> {
