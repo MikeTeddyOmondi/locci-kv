@@ -1,5 +1,5 @@
 # Multi-stage build for smallest Debian image
-FROM rust:1.83-slim AS chef
+FROM rust:1.88-slim AS chef
 RUN cargo install cargo-chef
 WORKDIR /app
 
