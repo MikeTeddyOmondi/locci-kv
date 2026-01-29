@@ -81,7 +81,10 @@ impl Server {
         if self.raft_enabled {
             let raft_node_clone = raft_node.clone().unwrap();
             let network_clone = network.clone().unwrap();
-            
+
+            // Start the TCP server for receiving Raft messages
+            network_clone.start_server().await?;
+
             tokio::spawn(async move {
                 Self::raft_event_loop(raft_node_clone, network_clone).await;
             });
@@ -96,20 +99,28 @@ impl Server {
     /// Raft event loop - processes Raft state machine
     async fn raft_event_loop(raft_node: Arc<RaftNode>, network: Arc<NetworkTransport>) {
         info!("Starting Raft event loop");
-        
+
         let mut tick_interval = tokio::time::interval(Duration::from_millis(100));
-        
+        let mut tick_count = 0u64;
+
         loop {
             tokio::select! {
                 _ = tick_interval.tick() => {
+                    tick_count += 1;
+
                     // Tick the Raft node
                     raft_node.tick();
-                    
+
+                    // Log every 10 ticks (1 second)
+                    if tick_count % 10 == 0 {
+                        debug!("Raft tick #{}, {}", tick_count, raft_node.raft_state());
+                    }
+
                     // Process ready state
                     match raft_node.handle_ready().await {
                         Ok(messages) => {
                             if !messages.is_empty() {
-                                debug!("Sending {} Raft messages", messages.len());
+                                info!("Sending {} Raft messages", messages.len());
                                 if let Err(e) = network.send_messages(messages).await {
                                     error!("Failed to send Raft messages: {}", e);
                                 }
@@ -120,10 +131,10 @@ impl Server {
                         }
                     }
                 }
-                
+
                 Some(msg) = network.recv_message() => {
                     // Process incoming Raft message
-                    debug!("Received Raft message: {:?}", msg.msg_type());
+                    info!("Received Raft message: {:?} from node {}", msg.msg_type(), msg.from);
                     if let Err(e) = raft_node.step(msg) {
                         error!("Error stepping Raft: {}", e);
                     }
