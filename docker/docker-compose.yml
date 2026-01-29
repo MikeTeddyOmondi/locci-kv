@@ -1,0 +1,92 @@
+services:
+  # Standalone mode (single node, no Raft)
+  locci-standalone:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: locci-standalone
+    ports:
+      - "8080:8080"
+    volumes:
+      - locci-kv-standalone-data:/app/data
+    environment:
+      - LOCCI_KV_BIND_ADDR=0.0.0.0:8080
+      - LOCCI_KV_DATA_DIR=/app/data
+      - LOCCI_LOG_LEVEL=info
+    command: ["start"]
+    profiles:
+      - standalone
+
+  # 3-node Raft cluster
+  locci-node1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: locci-node1
+    ports:
+      - "8081:8080"
+      - "9001:9001"
+    volumes:
+      - locci-kv-node1-data:/app/data
+      - ./configs/node1.yaml:/app/config.yaml:ro
+    command: ["--enable-raft", "--config", "/app/config.yaml", "start", "--bootstrap"]
+    networks:
+      - locci-cluster
+    profiles:
+      - cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  locci-node2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: locci-node2
+    ports:
+      - "8082:8080"
+      - "9002:9001"
+    volumes:
+      - locci-kv-node2-data:/app/data
+      - ./configs/node2.yaml:/app/config.yaml:ro
+    command: ["--enable-raft", "--config", "/app/config.yaml", "start"]
+    networks:
+      - locci-cluster
+    depends_on:
+      locci-node1:
+        condition: service_healthy
+    profiles:
+      - cluster
+
+  locci-node3:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: locci-node3
+    ports:
+      - "8083:8080"
+      - "9003:9001"
+    volumes:
+      - locci-kv-node3-data:/app/data
+      - ./configs/node3.yaml:/app/config.yaml:ro
+    command: ["--enable-raft", "--config", "/app/config.yaml", "start"]
+    networks:
+      - locci-cluster
+    depends_on:
+      locci-node1:
+        condition: service_healthy
+    profiles:
+      - cluster
+
+networks:
+  locci-cluster:
+    driver: bridge
+
+volumes:
+  locci-kv-standalone-data:
+  locci-kv-node1-data:
+  locci-kv-node2-data:
+  locci-kv-node3-data:
