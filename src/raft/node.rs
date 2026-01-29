@@ -230,7 +230,15 @@ impl RaftNode {
         cluster_config: &ClusterConfig,
     ) -> Result<Self> {
         // Create Raft storage adapter
-        let raft_storage = RaftStorageAdapter::new(storage.clone()).await?;
+        // All nodes need the initial ConfState with all voters for proper election
+        let peers: Vec<u64> = cluster_config.peers.iter().map(|p| p.id).collect();
+        let raft_storage = if cluster_config.bootstrap {
+            info!("Bootstrapping new cluster with peers: {:?}", peers);
+        } else {
+            info!("Joining cluster with peers: {:?}", peers);
+        };
+        // Both bootstrap and non-bootstrap nodes get the same initial voter list
+        let raft_storage = RaftStorageAdapter::new_with_bootstrap(storage.clone(), peers).await?;
 
         // Configure Raft
         let config = Config {
@@ -244,20 +252,11 @@ impl RaftNode {
             ..Default::default()
         };
 
-        // CHANGED: Create a proper logger for raft
+        // Create a proper logger for raft
         let logger = slog::Logger::root(slog::Discard, slog::o!());
 
         // Initialize Raft node
-        let raw_node = if cluster_config.bootstrap {
-            // Bootstrap a new cluster
-            let peers: Vec<u64> = cluster_config.peers.iter().map(|p| p.id).collect();
-            info!("Bootstrapping new cluster with peers: {:?}", peers);
-            RawNode::new(&config, raft_storage, &logger)?
-        } else {
-            // Join existing cluster
-            info!("Starting node to join existing cluster");
-            RawNode::new(&config, raft_storage, &logger)?
-        };
+        let raw_node = RawNode::new(&config, raft_storage, &logger)?;
 
         let state_machine = Arc::new(StateMachine::new(storage));
 
@@ -291,10 +290,10 @@ impl RaftNode {
             },
         );
 
-        // Propose to Raft
+        // Propose to Raft (pass proposal_id as context for tracking)
         {
             let mut node = self.raw_node.write();
-            node.propose(vec![], data)?;
+            node.propose(proposal_id.to_le_bytes().to_vec(), data)?;
         }
 
         // Wait for proposal to be committed (with timeout)
@@ -469,34 +468,26 @@ impl RaftNode {
     //     Ok([messages, light_messages].concat())
     // }
 
+    /// Get the current Raft state for debugging
+    pub fn raft_state(&self) -> String {
+        let node = self.raw_node.read();
+        let voters: Vec<u64> = node.raft.prs().conf().voters().ids().iter().collect();
+        let prs_count = node.raft.prs().iter().count();
+        format!(
+            "state={:?}, term={}, vote={}, lead={}, voters={:?}, prs_count={}",
+            node.raft.state,
+            node.raft.term,
+            node.raft.vote,
+            node.raft.leader_id,
+            voters,
+            prs_count
+        )
+    }
+
     /// Check if there's a ready state and process it
     pub async fn handle_ready(&self) -> Result<Vec<RaftMessage>> {
-        // let mut node = self.raw_node.write();
-
-        // if !node.has_ready() {
-        //     return Ok(Vec::new());
-        // }
-
-        // let mut ready = node.ready();
-        // let messages = ready.take_messages();
-
-        // // Clone data we need before dropping the lock
-        // let entries_to_save = ready.entries().to_vec();
-        // let committed_entries = ready.take_committed_entries();
-        // let hard_state_opt = ready.hs().cloned();
-
-        // // Get storage reference while we still have the lock
-        // let storage = node.mut_store().clone();
-
-        // // Release lock before async operations
-        // drop(node);
-
-        // // Perform async I/O operations
-        // if !entries_to_save.is_empty() {
-        //     storage.append_entries(&entries_to_save).await?;
-        // }
-        // Extract data we need in a limited scope
-        let (messages, entries_to_save, committed_entries, hard_state_opt, storage) = {
+        // Step 1: Get Ready and extract data that needs persistence
+        let (messages, persisted_messages, entries_to_save, ready_committed, hard_state_opt, storage, ready) = {
             let mut node = self.raw_node.write();
 
             if !node.has_ready() {
@@ -505,65 +496,68 @@ impl RaftNode {
 
             let mut ready = node.ready();
             let messages = ready.take_messages();
+            let persisted_messages = ready.take_persisted_messages();
             let entries_to_save = ready.entries().to_vec();
-            let committed_entries = ready.take_committed_entries();
+            let ready_committed = ready.take_committed_entries();
             let hard_state_opt = ready.hs().cloned();
             let storage = node.mut_store().clone();
 
-            // Advance here before dropping the lock
-            let mut light_rd = node.advance(ready);
-            let light_messages = light_rd.take_messages();
+            tracing::debug!(
+                "Raft Ready: messages={}, persisted_messages={}, entries={}, committed={}, has_hs={}",
+                messages.len(),
+                persisted_messages.len(),
+                entries_to_save.len(),
+                ready_committed.len(),
+                hard_state_opt.is_some()
+            );
 
-            // Return both message sets
-            (
-                vec![messages, light_messages].concat(),
-                entries_to_save,
-                committed_entries,
-                hard_state_opt,
-                storage,
-            )
-            // (
-            //     messages,
-            //     entries_to_save,
-            //     committed_entries,
-            //     hard_state_opt,
-            //     storage,
-            // )
-        }; // Lock is dropped here - scope ends
+            (messages, persisted_messages, entries_to_save, ready_committed, hard_state_opt, storage, ready)
+        }; // Drop lock to do async persistence
 
-        // Now all async operations - no lock held
+        // Step 2: Persist entries and hard state BEFORE advancing
         if !entries_to_save.is_empty() {
             storage.append_entries(&entries_to_save).await?;
         }
 
-        if let Some(hs) = hard_state_opt {
-            storage.save_hard_state(&hs).await?;
+        if let Some(hs) = &hard_state_opt {
+            storage.save_hard_state(hs).await?;
         }
+
+        // Step 3: Now advance (this tells raft-rs entries are persisted)
+        let (light_messages, light_committed) = {
+            let mut node = self.raw_node.write();
+            let mut light_rd = node.advance(ready);
+            let light_messages = light_rd.take_messages();
+            let light_committed = light_rd.take_committed_entries();
+            (light_messages, light_committed)
+        };
+
+        // Combine all messages and committed entries
+        let total_messages = vec![messages, persisted_messages, light_messages].concat();
+        let committed_entries = vec![ready_committed, light_committed].concat();
 
         // Apply committed entries
         for entry in committed_entries {
             if entry.data.is_empty() {
+                // Skip empty/config entries
                 continue;
             }
 
             if let Ok(proposal) = bincode::deserialize::<Proposal>(&entry.data) {
-                let entry_index = entry.index;
                 let result = self.state_machine.apply(proposal).await;
 
-                // Notify the specific pending proposal
-                if let Some(pending) = self.pending_proposals.write().remove(&entry_index) {
-                    let _ = pending.response_tx.send(result);
+                // Extract proposal_id from context to notify pending proposal
+                if entry.context.len() >= 8 {
+                    let proposal_id = u64::from_le_bytes(
+                        entry.context[..8].try_into().unwrap_or([0; 8])
+                    );
+                    if let Some(pending) = self.pending_proposals.write().remove(&proposal_id) {
+                        let _ = pending.response_tx.send(result);
+                    }
                 }
             }
         }
 
-        // // Reacquire lock to advance Raft
-        // let mut node = self.raw_node.write();
-        // let mut light_rd = node.advance(ready);
-        // let light_messages = light_rd.take_messages();
-
-        // Ok([messages, light_messages].concat())
-
-        Ok(messages)  // Return the combined messages
+        Ok(total_messages)
     }
 }
