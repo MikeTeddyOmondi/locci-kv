@@ -232,11 +232,11 @@ impl RaftNode {
         // Create Raft storage adapter
         // All nodes need the initial ConfState with all voters for proper election
         let peers: Vec<u64> = cluster_config.peers.iter().map(|p| p.id).collect();
-        let raft_storage = if cluster_config.bootstrap {
+        if cluster_config.bootstrap {
             info!("Bootstrapping new cluster with peers: {:?}", peers);
         } else {
             info!("Joining cluster with peers: {:?}", peers);
-        };
+        }
         // Both bootstrap and non-bootstrap nodes get the same initial voter list
         let raft_storage = RaftStorageAdapter::new_with_bootstrap(storage.clone(), peers).await?;
 
@@ -475,19 +475,22 @@ impl RaftNode {
         let prs_count = node.raft.prs().iter().count();
         format!(
             "state={:?}, term={}, vote={}, lead={}, voters={:?}, prs_count={}",
-            node.raft.state,
-            node.raft.term,
-            node.raft.vote,
-            node.raft.leader_id,
-            voters,
-            prs_count
+            node.raft.state, node.raft.term, node.raft.vote, node.raft.leader_id, voters, prs_count
         )
     }
 
     /// Check if there's a ready state and process it
     pub async fn handle_ready(&self) -> Result<Vec<RaftMessage>> {
         // Step 1: Get Ready and extract data that needs persistence
-        let (messages, persisted_messages, entries_to_save, ready_committed, hard_state_opt, storage, ready) = {
+        let (
+            messages,
+            persisted_messages,
+            entries_to_save,
+            ready_committed,
+            hard_state_opt,
+            storage,
+            ready,
+        ) = {
             let mut node = self.raw_node.write();
 
             if !node.has_ready() {
@@ -511,7 +514,15 @@ impl RaftNode {
                 hard_state_opt.is_some()
             );
 
-            (messages, persisted_messages, entries_to_save, ready_committed, hard_state_opt, storage, ready)
+            (
+                messages,
+                persisted_messages,
+                entries_to_save,
+                ready_committed,
+                hard_state_opt,
+                storage,
+                ready,
+            )
         }; // Drop lock to do async persistence
 
         // Step 2: Persist entries and hard state BEFORE advancing
@@ -533,8 +544,8 @@ impl RaftNode {
         };
 
         // Combine all messages and committed entries
-        let total_messages = vec![messages, persisted_messages, light_messages].concat();
-        let committed_entries = vec![ready_committed, light_committed].concat();
+        let total_messages = [messages, persisted_messages, light_messages].concat();
+        let committed_entries = [ready_committed, light_committed].concat();
 
         // Apply committed entries
         for entry in committed_entries {
@@ -548,9 +559,8 @@ impl RaftNode {
 
                 // Extract proposal_id from context to notify pending proposal
                 if entry.context.len() >= 8 {
-                    let proposal_id = u64::from_le_bytes(
-                        entry.context[..8].try_into().unwrap_or([0; 8])
-                    );
+                    let proposal_id =
+                        u64::from_le_bytes(entry.context[..8].try_into().unwrap_or([0; 8]));
                     if let Some(pending) = self.pending_proposals.write().remove(&proposal_id) {
                         let _ = pending.response_tx.send(result);
                     }

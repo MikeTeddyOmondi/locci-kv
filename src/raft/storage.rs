@@ -366,6 +366,7 @@ use std::sync::Arc;
 
 const RAFT_HARD_STATE_KEY: &[u8] = b"__raft_hard_state__";
 const RAFT_CONF_STATE_KEY: &[u8] = b"__raft_conf_state__";
+#[allow(dead_code)] // Used in Phase 3 for snapshots
 const RAFT_SNAPSHOT_KEY: &[u8] = b"__raft_snapshot__";
 const RAFT_LOG_PREFIX: &[u8] = b"__raft_log_";
 

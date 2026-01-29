@@ -1,11 +1,11 @@
-use std::sync::Arc;
-use std::time::Duration;
-use tracing::{info, error, debug};
 use crate::config::Config;
 use crate::error::{LocciKVError, Result};
 use crate::network::NetworkTransport;
 use crate::raft::RaftNode;
-use crate::storage::{Storage, rocksdb_storage::RocksDBStorage};
+use crate::storage::{rocksdb_storage::RocksDBStorage, Storage};
+use std::sync::Arc;
+use std::time::Duration;
+use tracing::{debug, error, info};
 
 pub struct Server {
     config: Config,
@@ -25,7 +25,10 @@ impl Server {
         let storage_path = config.server.data_dir.join("rocksdb");
         let storage = RocksDBStorage::new(storage_path, &config.storage.rocksdb)?;
 
-        info!("Initialized RocksDB storage at {:?}", config.server.data_dir);
+        info!(
+            "Initialized RocksDB storage at {:?}",
+            config.server.data_dir
+        );
 
         Ok(Self {
             config,
@@ -39,7 +42,7 @@ impl Server {
     /// Enable Raft consensus
     pub async fn with_raft(mut self) -> Result<Self> {
         info!("Initializing Raft consensus...");
-        
+
         // Create network transport
         let network = Arc::new(NetworkTransport::new(
             self.config.server.id,
@@ -61,13 +64,16 @@ impl Server {
         self.network = Some(network);
         self.raft_enabled = true;
 
-        info!("Raft consensus initialized for node {}", self.config.server.id);
+        info!(
+            "Raft consensus initialized for node {}",
+            self.config.server.id
+        );
         Ok(self)
     }
 
     pub async fn start(self) -> Result<()> {
         let addr = self.config.server.bind_addr.clone();
-        
+
         info!("Starting Locci KV server on {}", addr);
         info!("Server ID: {}", self.config.server.id);
         info!("Data directory: {:?}", self.config.server.data_dir);
@@ -112,7 +118,7 @@ impl Server {
                     raft_node.tick();
 
                     // Log every 10 ticks (1 second)
-                    if tick_count % 10 == 0 {
+                    if tick_count.is_multiple_of(10) {
                         debug!("Raft tick #{}, {}", tick_count, raft_node.raft_state());
                     }
 

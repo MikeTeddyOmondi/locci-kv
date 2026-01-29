@@ -1,10 +1,10 @@
+pub mod api;
 pub mod config;
 pub mod error;
-pub mod storage;
-pub mod server;
-pub mod api;
-pub mod raft;
 pub mod network;
+pub mod raft;
+pub mod server;
+pub mod storage;
 
 pub use config::Config;
 pub use error::{LocciKVError, Result};

@@ -43,7 +43,7 @@ enum Commands {
         #[arg(long)]
         bootstrap: bool,
     },
-    
+
     /// Run in standalone mode (single node, no Raft)
     Standalone,
 }
@@ -53,7 +53,9 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Initialize tracing/logging
-    let log_level = cli.log_level.parse::<tracing::Level>()
+    let log_level = cli
+        .log_level
+        .parse::<tracing::Level>()
         .unwrap_or(tracing::Level::INFO);
 
     tracing_subscriber::registry()
@@ -73,18 +75,18 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Some(Commands::Start { bootstrap }) => {
             tracing::info!("Starting Locci KV server...");
-            
+
             // Update bootstrap flag from CLI
             config.cluster.bootstrap = bootstrap;
-            
+
             // Create server
             let mut server = Server::new(config)?;
-            
+
             // Enable Raft if requested
             if cli.enable_raft {
                 server = server.with_raft().await?;
             }
-            
+
             server.start().await?;
         }
         Some(Commands::Standalone) | None => {

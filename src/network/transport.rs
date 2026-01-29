@@ -98,7 +98,10 @@ impl NetworkTransport {
             let len = u32::from_be_bytes(len_buf) as usize;
             if len == 0 || len > 10 * 1024 * 1024 {
                 // Sanity check: max 10MB
-                return Err(LocciKVError::Network(format!("Invalid message length: {}", len)));
+                return Err(LocciKVError::Network(format!(
+                    "Invalid message length: {}",
+                    len
+                )));
             }
 
             // Read message body
@@ -197,15 +200,18 @@ impl NetworkTransport {
     /// Write a length-prefixed message to a stream
     async fn write_message(stream: &mut TcpStream, data: &[u8]) -> Result<()> {
         let len = data.len() as u32;
-        stream.write_all(&len.to_be_bytes()).await.map_err(|e| {
-            LocciKVError::Network(format!("Failed to write length: {}", e))
-        })?;
-        stream.write_all(data).await.map_err(|e| {
-            LocciKVError::Network(format!("Failed to write data: {}", e))
-        })?;
-        stream.flush().await.map_err(|e| {
-            LocciKVError::Network(format!("Failed to flush: {}", e))
-        })?;
+        stream
+            .write_all(&len.to_be_bytes())
+            .await
+            .map_err(|e| LocciKVError::Network(format!("Failed to write length: {}", e)))?;
+        stream
+            .write_all(data)
+            .await
+            .map_err(|e| LocciKVError::Network(format!("Failed to write data: {}", e)))?;
+        stream
+            .flush()
+            .await
+            .map_err(|e| LocciKVError::Network(format!("Failed to flush: {}", e)))?;
         Ok(())
     }
 

@@ -1,17 +1,17 @@
+use crate::error::{LocciKVError, Result};
+use crate::raft::{Proposal, RaftNode};
+use crate::storage::Storage;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post, delete},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tracing::info;
-use crate::error::{LocciKVError, Result};
-use crate::raft::{Proposal, RaftNode};
-use crate::storage::Storage;
 
 #[derive(Clone)]
 struct AppState {
@@ -57,22 +57,21 @@ struct RaftStatusResponse {
 impl IntoResponse for LocciKVError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
-            LocciKVError::KeyNotFound(key) => (StatusCode::NOT_FOUND, format!("Key not found: {}", key)),
+            LocciKVError::KeyNotFound(key) => {
+                (StatusCode::NOT_FOUND, format!("Key not found: {}", key))
+            }
             LocciKVError::InvalidOperation(msg) => (StatusCode::BAD_REQUEST, msg),
             LocciKVError::NotLeader(leader_id) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("Not leader. Current leader: {:?}", leader_id),
             ),
-            LocciKVError::ProposalTimeout => (
-                StatusCode::REQUEST_TIMEOUT,
-                "Proposal timeout".to_string(),
-            ),
+            LocciKVError::ProposalTimeout => {
+                (StatusCode::REQUEST_TIMEOUT, "Proposal timeout".to_string())
+            }
             _ => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
 
-        let body = Json(ErrorResponse {
-            error: message,
-        });
+        let body = Json(ErrorResponse { error: message });
 
         (status, body).into_response()
     }
@@ -83,10 +82,7 @@ pub async fn start_http_server(
     storage: Arc<dyn Storage>,
     raft_node: Option<Arc<RaftNode>>,
 ) -> Result<()> {
-    let state = AppState { 
-        storage,
-        raft_node,
-    };
+    let state = AppState { storage, raft_node };
 
     let app = Router::new()
         .route("/", get(health_check))
@@ -100,12 +96,14 @@ pub async fn start_http_server(
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(&addr).await
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
         .map_err(|e| LocciKVError::Server(format!("Failed to bind to {}: {}", addr, e)))?;
 
     info!("HTTP server listening on {}", addr);
 
-    axum::serve(listener, app).await
+    axum::serve(listener, app)
+        .await
         .map_err(|e| LocciKVError::Server(format!("Server error: {}", e)))?;
 
     Ok(())
@@ -143,7 +141,10 @@ async fn get_key(
     Path(key): Path<String>,
 ) -> Result<Json<GetResponse>> {
     // Reads can go directly to storage (linearizable reads would need leader check)
-    let value = state.storage.get(key.as_bytes()).await?
+    let value = state
+        .storage
+        .get(key.as_bytes())
+        .await?
         .ok_or_else(|| LocciKVError::KeyNotFound(key.clone()))?;
 
     let value_str = String::from_utf8(value)
@@ -172,11 +173,14 @@ async fn put_key(
             key: key.as_bytes().to_vec(),
             value: req.value.as_bytes().to_vec(),
         };
-        
+
         raft_node.propose(proposal).await?;
     } else {
         // Direct write (Phase 1 mode)
-        state.storage.put(key.as_bytes(), req.value.as_bytes()).await?;
+        state
+            .storage
+            .put(key.as_bytes(), req.value.as_bytes())
+            .await?;
     }
 
     Ok(Json(SuccessResponse {
@@ -204,7 +208,7 @@ async fn delete_key(
         let proposal = Proposal::Delete {
             key: key.as_bytes().to_vec(),
         };
-        
+
         raft_node.propose(proposal).await?;
     } else {
         // Direct delete (Phase 1 mode)
@@ -218,7 +222,7 @@ async fn delete_key(
 
 async fn list_keys(State(state): State<AppState>) -> Result<Json<ListResponse>> {
     let keys_bytes = state.storage.list_keys(None).await?;
-    
+
     let keys: Vec<String> = keys_bytes
         .into_iter()
         .filter_map(|k| String::from_utf8(k).ok())

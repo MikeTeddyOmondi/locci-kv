@@ -1,6 +1,6 @@
+use crate::error::{LocciKVError, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use crate::error::{LocciKVError, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -71,7 +71,7 @@ impl Config {
         if let Some(path) = config_path {
             let contents = std::fs::read_to_string(&path)
                 .map_err(|e| LocciKVError::Config(format!("Failed to read config file: {}", e)))?;
-            
+
             config = serde_yaml::from_str(&contents)
                 .map_err(|e| LocciKVError::Config(format!("Failed to parse config file: {}", e)))?;
         }
@@ -80,7 +80,12 @@ impl Config {
     }
 
     /// Merge CLI overrides into the config
-    pub fn merge_overrides(&mut self, id: Option<u64>, bind_addr: Option<String>, data_dir: Option<PathBuf>) {
+    pub fn merge_overrides(
+        &mut self,
+        id: Option<u64>,
+        bind_addr: Option<String>,
+        data_dir: Option<PathBuf>,
+    ) {
         if let Some(id) = id {
             self.server.id = id;
         }
@@ -124,12 +129,10 @@ impl Default for Config {
                 pre_vote: true,
             },
             cluster: ClusterConfig {
-                peers: vec![
-                    PeerConfig {
-                        id: 1,
-                        addr: "127.0.0.1:9001".to_string(),
-                    },
-                ],
+                peers: vec![PeerConfig {
+                    id: 1,
+                    addr: "127.0.0.1:9001".to_string(),
+                }],
                 bootstrap: false,
             },
         }
