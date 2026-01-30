@@ -8,7 +8,7 @@ Docker configuration for Locci KV distributed key-value store.
 
 ```bash
 # From project root
-docker build -t locci-kv:latest -f docker/Dockerfile .
+docker build -t locci/kv:latest -f docker/Dockerfile .
 
 # Or using just
 just docker-build
@@ -21,7 +21,7 @@ just docker-build
 docker run -d --name locci-kv \
   -p 8080:8080 \
   -v locci-data:/app/data \
-  locci-kv:latest
+  locci/kv:latest
 
 # Or using docker-compose
 docker compose -f docker/docker-compose.yml --profile standalone up -d
@@ -123,7 +123,7 @@ just docker-clean
 ```bash
 # Build for linux/amd64 and linux/arm64
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t locci-kv:latest -f docker/Dockerfile .
+  -t locci/kv:latest -f docker/Dockerfile .
 ```
 
 ## Docker Hub
@@ -134,5 +134,5 @@ Images are automatically published to Docker Hub on:
 
 Pull the latest image:
 ```bash
-docker pull your-org/locci-kv:latest
+docker pull locci/kv:latest
 ```

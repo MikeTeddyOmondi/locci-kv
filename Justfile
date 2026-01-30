@@ -141,15 +141,14 @@ _create-node-config id http_port raft_port:
 
 # Build Docker image
 docker-build:
-    docker build -t locci-kv:latest -f docker/Dockerfile .
+    docker build -t locci/kv:latest -f docker/Dockerfile .
 
 # Build Docker image with specific tag
 docker-build-tag tag:
-    docker build -t locci-kv:{{tag}} -f docker/Dockerfile .
-
+    docker build -t locci/kv:{{tag}} -f docker/Dockerfile .
 # Run standalone container
 docker-run:
-    docker run -d --name locci-kv -p 8080:8080 locci-kv:latest
+    docker run -d --name locci-kv -p 8080:8080 locci/kv:latest
 
 # Stop and remove standalone container
 docker-stop:
@@ -178,7 +177,7 @@ docker-standalone-down:
 # Clean all docker resources
 docker-clean:
     docker compose -f docker/docker-compose.yml down -v --remove-orphans
-    docker rmi locci-kv:latest 2>/dev/null || true
+    docker rmi locci/kv:latest 2>/dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Benchmark Commands
