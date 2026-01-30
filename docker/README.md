@@ -24,7 +24,7 @@ docker run -d --name locci-kv \
   locci/kv:latest
 
 # Or using docker-compose
-docker compose -f docker/docker-compose.yml --profile standalone up -d
+docker-compose -f docker/docker-compose.yml --profile standalone up -d
 
 # Or using just
 just docker-standalone-up
@@ -34,7 +34,7 @@ just docker-standalone-up
 
 ```bash
 # Using docker-compose
-docker compose -f docker/docker-compose.yml --profile cluster up -d
+docker-compose -f docker/docker-compose.yml --profile cluster up -d
 
 # Or using just
 just docker-cluster-up
@@ -52,8 +52,8 @@ just docker-cluster-logs
 
 ```bash
 # Start specific profile
-docker compose -f docker/docker-compose.yml --profile standalone up -d
-docker compose -f docker/docker-compose.yml --profile cluster up -d
+docker-compose -f docker/docker-compose.yml --profile standalone up -d
+docker-compose -f docker/docker-compose.yml --profile cluster up -d
 ```
 
 ## Ports
@@ -109,10 +109,10 @@ curl http://localhost:8083/kv/test
 
 ```bash
 # Stop and remove containers
-docker compose -f docker/docker-compose.yml down
+docker-compose -f docker/docker-compose.yml down
 
 # Also remove volumes
-docker compose -f docker/docker-compose.yml down -v
+docker-compose -f docker/docker-compose.yml down -v
 
 # Or using just
 just docker-clean

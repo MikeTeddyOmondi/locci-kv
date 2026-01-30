@@ -156,27 +156,27 @@ docker-stop:
 
 # Start 3-node cluster with docker-compose
 docker-cluster-up:
-    docker compose -f docker/docker-compose.yml --profile cluster up -d
+    docker-compose -f docker/docker-compose.yml --profile cluster up -d
 
 # Stop cluster
 docker-cluster-down:
-    docker compose -f docker/docker-compose.yml --profile cluster down
+    docker-compose -f docker/docker-compose.yml --profile cluster down
 
 # View cluster logs
 docker-cluster-logs:
-    docker compose -f docker/docker-compose.yml --profile cluster logs -f
+    docker-compose -f docker/docker-compose.yml --profile cluster logs -f
 
 # Start standalone with docker-compose
 docker-standalone-up:
-    docker compose -f docker/docker-compose.yml --profile standalone up -d
+    docker-compose -f docker/docker-compose.yml --profile standalone up -d
 
 # Stop standalone
 docker-standalone-down:
-    docker compose -f docker/docker-compose.yml --profile standalone down
+    docker-compose -f docker/docker-compose.yml --profile standalone down
 
 # Clean all docker resources
 docker-clean:
-    docker compose -f docker/docker-compose.yml down -v --remove-orphans
+    docker-compose -f docker/docker-compose.yml down -v --remove-orphans
     docker rmi locci/kv:latest 2>/dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────
