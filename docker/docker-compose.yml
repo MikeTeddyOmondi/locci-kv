@@ -1,10 +1,11 @@
 services:
   # Standalone mode (single node, no Raft)
-  locci-standalone:
+  locci-kv-standalone:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: locci-standalone
+    container_name: locci-kv-standalone
+    image: locci/kv:latest
     ports:
       - "8080:8080"
     volumes:
@@ -14,15 +15,18 @@ services:
       - LOCCI_KV_DATA_DIR=/app/data
       - LOCCI_LOG_LEVEL=info
     command: ["start"]
+    networks:
+      - locci-kv-standalone
     profiles:
       - standalone
 
   # 3-node Raft cluster
-  locci-node1:
+  locci-kv-node1:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: locci-node1
+    container_name: locci-kv-node1
+    image: locci/kv:latest
     ports:
       - "8081:8080"
       - "9001:9001"
@@ -31,7 +35,7 @@ services:
       - ./configs/node1.yaml:/app/config.yaml:ro
     command: ["--enable-raft", "--config", "/app/config.yaml", "start", "--bootstrap"]
     networks:
-      - locci-cluster
+      - locci-kv-cluster
     profiles:
       - cluster
     healthcheck:
@@ -41,11 +45,12 @@ services:
       retries: 5
       start_period: 10s
 
-  locci-node2:
+  locci-kv-node2:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: locci-node2
+    container_name: locci-kv-node2
+    image: locci/kv:latest    
     ports:
       - "8082:8080"
       - "9002:9001"
@@ -54,18 +59,19 @@ services:
       - ./configs/node2.yaml:/app/config.yaml:ro
     command: ["--enable-raft", "--config", "/app/config.yaml", "start"]
     networks:
-      - locci-cluster
+      - locci-kv-cluster
     depends_on:
-      locci-node1:
+      locci-kv-node1:
         condition: service_healthy
     profiles:
       - cluster
 
-  locci-node3:
+  locci-kv-node3:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: locci-node3
+    container_name: locci-kv-node3
+    image: locci/kv:latest
     ports:
       - "8083:8080"
       - "9003:9001"
@@ -74,15 +80,19 @@ services:
       - ./configs/node3.yaml:/app/config.yaml:ro
     command: ["--enable-raft", "--config", "/app/config.yaml", "start"]
     networks:
-      - locci-cluster
+      - locci-kv-cluster
     depends_on:
-      locci-node1:
+      locci-kv-node1:
         condition: service_healthy
     profiles:
       - cluster
 
 networks:
-  locci-cluster:
+  locci-kv-standalone:
+    name: locci-kv-standalone
+    driver: bridge
+  locci-kv-cluster:
+    name: locci-kv-cluster
     driver: bridge
 
 volumes:
