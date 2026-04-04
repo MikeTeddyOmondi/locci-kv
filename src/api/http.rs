@@ -2,7 +2,7 @@ use crate::error::{LocciKVError, Result};
 use crate::raft::{Proposal, RaftNode};
 use crate::storage::Storage;
 use axum::{
-    extract::{Path, State},
+    extract::{DefaultBodyLimit, Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -90,7 +90,10 @@ pub async fn start_http_server(
         .route("/stats", get(get_stats))
         .route("/raft/status", get(raft_status))
         .route("/kv/:key", get(get_key))
-        .route("/kv/:key", post(put_key))
+        .route(
+            "/kv/:key",
+            post(put_key).layer(DefaultBodyLimit::max(32 * 1024 * 1024)),
+        )
         .route("/kv/:key", delete(delete_key))
         .route("/keys", get(list_keys))
         .layer(TraceLayer::new_for_http())
