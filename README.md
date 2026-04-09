@@ -94,10 +94,10 @@ cargo build --release
 ### Run with environment variables
 
 ```bash
-export LOCCI_CONFIG=config.yaml
-export LOCCI_SERVER_ID=1
-export LOCCI_BIND_ADDR=127.0.0.1:8080
-export LOCCI_DATA_DIR=./data
+export LOCCI_KV_CONFIG=config.yaml
+export LOCCI_KV_SERVER_ID=1
+export LOCCI_KV_BIND_ADDR=127.0.0.1:8080
+export LOCCI_KV_DATA_DIR=./data
 
 ./target/release/locci-kv start
 ```

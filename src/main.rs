@@ -24,11 +24,11 @@ struct Cli {
     data_dir: Option<PathBuf>,
 
     /// Log level (trace, debug, info, warn, error)
-    #[arg(long, env = "LOCCI_LOG_LEVEL", default_value = "info")]
+    #[arg(long, env = "LOCCI_KV_LOG_LEVEL", default_value = "info")]
     log_level: String,
 
     /// Enable Raft consensus (default: false for Phase 1 compatibility)
-    #[arg(long, env = "LOCCI_ENABLE_RAFT")]
+    #[arg(long, env = "LOCCI_KV_ENABLE_RAFT")]
     enable_raft: bool,
 
     #[command(subcommand)]

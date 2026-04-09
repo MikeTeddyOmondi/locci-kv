@@ -80,7 +80,7 @@ Data is persisted in Docker volumes:
 |----------|---------|-------------|
 | `LOCCI_KV_BIND_ADDR` | `0.0.0.0:8080` | HTTP bind address |
 | `LOCCI_KV_DATA_DIR` | `/app/data` | Data directory |
-| `LOCCI_LOG_LEVEL` | `info` | Log level |
+| `LOCCI_KV_LOG_LEVEL` | `info` | Log level |
 
 ## Testing the Cluster
 
