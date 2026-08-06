@@ -2,7 +2,7 @@ use super::{Storage, StorageStats};
 use crate::config::RocksDBConfig;
 use crate::error::Result;
 use async_trait::async_trait;
-use rocksdb::{IteratorMode, Options, DB};
+use rocksdb::{Direction, IteratorMode, Options, DB};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -63,18 +63,25 @@ impl Storage for RocksDBStorage {
         let db = self.db.read().await;
         let mut keys = Vec::new();
 
-        let iter = db.iterator(IteratorMode::Start);
-
-        for item in iter {
-            let (key, _) = item?;
-
-            // Filter by prefix if provided
-            if let Some(p) = prefix {
-                if key.starts_with(p) {
+        match prefix {
+            // Seek straight to the prefix and stop at the first key past it,
+            // so cost scales with the matching range rather than the store.
+            Some(p) => {
+                let iter = db.iterator(IteratorMode::From(p, Direction::Forward));
+                for item in iter {
+                    let (key, _) = item?;
+                    if !key.starts_with(p) {
+                        break;
+                    }
                     keys.push(key.to_vec());
                 }
-            } else {
-                keys.push(key.to_vec());
+            }
+            None => {
+                let iter = db.iterator(IteratorMode::Start);
+                for item in iter {
+                    let (key, _) = item?;
+                    keys.push(key.to_vec());
+                }
             }
         }
 
