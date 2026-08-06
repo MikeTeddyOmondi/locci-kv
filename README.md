@@ -136,6 +136,18 @@ curl -X DELETE http://localhost:8080/kv/mykey
 curl http://localhost:8080/keys
 ```
 
+### List keys by prefix
+
+Scoped listing seeks directly to the prefix instead of scanning the whole store,
+so latency scales with the number of matching keys rather than the store size.
+
+```bash
+curl http://localhost:8080/keys/locci-functions:proj_xyz
+```
+
+The prefix is a byte prefix, not a path segment — `proj_xyz` also matches
+`proj_xyzzy`. URL-encode any `/` in the prefix (`%2F`).
+
 ### Get storage statistics
 
 ```bash
