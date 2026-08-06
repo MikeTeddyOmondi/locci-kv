@@ -1,6 +1,8 @@
 # Multi-stage build for smallest Debian image
 FROM rust:1.88-slim AS chef
-RUN cargo install cargo-chef
+# --locked pins cargo-chef's own dependency versions; without it cargo resolves
+# transitive deps that require a newer rustc than this base image.
+RUN cargo install cargo-chef --locked
 WORKDIR /app
 
 FROM chef AS planner
