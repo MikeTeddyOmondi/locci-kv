@@ -96,6 +96,7 @@ pub async fn start_http_server(
         )
         .route("/kv/:key", delete(delete_key))
         .route("/keys", get(list_keys))
+        .route("/keys/:prefix", get(list_keys_with_prefix))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -225,6 +226,22 @@ async fn delete_key(
 
 async fn list_keys(State(state): State<AppState>) -> Result<Json<ListResponse>> {
     let keys_bytes = state.storage.list_keys(None).await?;
+
+    let keys: Vec<String> = keys_bytes
+        .into_iter()
+        .filter_map(|k| String::from_utf8(k).ok())
+        .collect();
+
+    let count = keys.len();
+
+    Ok(Json(ListResponse { keys, count }))
+}
+
+async fn list_keys_with_prefix(
+    State(state): State<AppState>,
+    Path(prefix): Path<String>,
+) -> Result<Json<ListResponse>> {
+    let keys_bytes = state.storage.list_keys(Some(prefix.as_bytes())).await?;
 
     let keys: Vec<String> = keys_bytes
         .into_iter()
