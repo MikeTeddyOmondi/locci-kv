@@ -79,8 +79,26 @@ sudo install -m 755 locci-kv /usr/local/bin/
 locci-kv --version
 ```
 
-Release notes for each tag are generated on the release page; the curated
-history is in [CHANGELOG.md](CHANGELOG.md).
+Release notes on each release page come from that version's section of
+[CHANGELOG.md](CHANGELOG.md), with the commit list appended.
+
+### Nightly builds
+
+Untagged builds of the development branch, for testing before a release.
+
+- **Images**: `locci/kv:nightly-YYYYMMDD` on Docker Hub (see below).
+- **Binaries**: workflow artifacts on the scheduled or manually dispatched
+  [nightly runs](https://github.com/MikeTeddyOmondi/locci-kv/actions/workflows/nightly.yml),
+  kept for 14 days:
+
+  ```bash
+  gh run download --repo MikeTeddyOmondi/locci-kv \
+    --name locci-kv-linux-amd64-nightly
+  ```
+
+  Archives are stamped `…-nightly-YYYYMMDD-<sha>` so a binary traces back to the
+  commit that produced it. They are not built on every push — only on the
+  schedule and on manual dispatch.
 
 ### Build from source
 

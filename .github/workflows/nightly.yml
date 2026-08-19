@@ -82,3 +82,98 @@ jobs:
             echo
             echo "Pin the dated tag in a cluster — \`nightly\` moves."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── Nightly binaries ────────────────────────────────────────────────────────
+  # Workflow artifacts rather than a release: these are throwaway builds for
+  # testing, and a rolling pre-release would clutter the releases page that
+  # `v*` tags own.
+  #
+  # Deliberately NOT run on every push — a four-target cross-compile per commit
+  # is slow and almost always wasted. Scheduled and manual runs only.
+  binaries:
+    name: nightly ${{ matrix.asset_name }}
+    if: >-
+      github.repository_owner == 'MikeTeddyOmondi' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            asset_name: locci-kv-linux-amd64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            asset_name: locci-kv-linux-arm64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            asset_name: locci-kv-darwin-amd64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            asset_name: locci-kv-darwin-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Nightlies rebuild the same dependency tree every night; without a cache
+      # that is the bulk of the job.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Install protobuf
+        run: |
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler libprotobuf-dev
+          else
+            brew install protobuf
+          fi
+
+      - name: Build
+        run: |
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+            export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+          fi
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Strip binary
+        run: |
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/locci-kv
+          else
+            strip target/${{ matrix.target }}/release/locci-kv
+          fi
+
+      - name: Create archive
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/locci-kv dist/
+          cd dist
+          # Stamped with the date and commit so a downloaded binary can be
+          # traced back to what built it.
+          NAME="${{ matrix.asset_name }}-nightly-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
+          tar -czf "$NAME.tar.gz" locci-kv
+          shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}-nightly
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          # Long enough to test a build, short enough not to accumulate.
+          retention-days: 14
