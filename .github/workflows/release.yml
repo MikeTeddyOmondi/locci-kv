@@ -131,6 +131,31 @@ jobs:
             echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      # Signatures, not just checksums: a .sha256 sitting beside the artifact
+      # proves it was not corrupted, not that we produced it — anyone who can
+      # replace the tarball can replace its checksum too.
+      - name: Import GPG signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_KEY }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent
+
+      - name: Sign release archives
+        env:
+          GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: |
+          # Artifacts land one directory deep per target, so sign in place
+          # rather than flattening and breaking the upload globs below.
+          find artifacts -name '*.tar.gz' -print0 | while IFS= read -r -d '' f; do
+            echo "signing $f"
+            echo "$GPG_PASSPHRASE" | gpg --batch --yes \
+              --passphrase-fd 0 \
+              --pinentry-mode loopback \
+              --detach-sign --armor "$f"
+          done
+
       # The curated notes live in CHANGELOG.md. Pull out the section for this
       # tag rather than attaching the whole file, so the release page shows the
       # changes for this version and nothing else.
@@ -164,5 +189,6 @@ jobs:
           files: |
             artifacts/**/*.tar.gz
             artifacts/**/*.sha256
+            artifacts/**/*.tar.gz.asc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
