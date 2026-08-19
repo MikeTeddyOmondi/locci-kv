@@ -1,0 +1,84 @@
+# Nightly images from the active development branch, for testing against a real
+# cluster before a release.
+#
+# Tags every build `nightly-YYYYMMDD` and moves `nightly` to the newest. Pin the
+# dated tag in a cluster: `nightly` moves under you, and a Deployment that pulls
+# it cannot tell you which build it is running.
+#
+# Production images come from docker.yml — the default branch and `v*` tags.
+name: nightly
+
+on:
+  schedule:
+    # 02:00 UTC, after a day's merges have landed.
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+  push:
+    # Development happens on phase-* branches here; `dev` is included so the
+    # workflow keeps working if that convention changes.
+    branches:
+      - dev
+      - "phase-*"
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: locci/kv
+
+jobs:
+  docker:
+    name: docker locci/kv:nightly
+    runs-on: ubuntu-latest
+    # A scheduled run on a fork would push to the upstream registry.
+    if: github.repository_owner == 'MikeTeddyOmondi'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=nightly-{{date 'YYYYMMDD'}}
+            type=raw,value=nightly
+            type=sha,prefix=nightly-,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          # arm64 as well as amd64: development happens on Apple silicon while
+          # test clusters and mini PCs are usually amd64.
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### Nightly image"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo
+            echo "Pin the dated tag in a cluster — \`nightly\` moves."
+          } >> "$GITHUB_STEP_SUMMARY"

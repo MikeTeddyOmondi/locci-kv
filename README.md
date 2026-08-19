@@ -56,6 +56,41 @@ See [docs/PHASE_3_PERFORMANCE.md](docs/PHASE_3_PERFORMANCE.md) for optimization 
 cargo build --release
 ```
 
+### Run with Docker
+
+```bash
+docker run -d --name locci-kv \
+  -p 8080:8080 \
+  -v locci-kv-data:/data \
+  -e LOCCI_KV_BIND_ADDR=0.0.0.0:8080 \
+  -e LOCCI_KV_DATA_DIR=/data \
+  locci/kv:latest
+```
+
+The volume matters: without it the RocksDB store lives in the container's
+writable layer and is lost on every recreate.
+
+#### Image tags
+
+Published to Docker Hub as `locci/kv`.
+
+| Tag                | Built from            | Use for |
+| ------------------ | --------------------- | ------- |
+| `latest`           | default branch        | Tracking the tip. Moves. |
+| `vX.Y.Z`, `vX.Y`, `vX` | `v*` git tags     | **Production.** Immutable. |
+| `nightly-YYYYMMDD` | development branches  | Testing a specific day's build against a cluster. Immutable. |
+| `nightly`          | development branches  | Convenience. Moves — do not pin it. |
+| `<sha>`            | any build             | Reproducing one exact commit. |
+
+Pin a dated or semver tag in a cluster. A Deployment pulling `latest` or
+`nightly` cannot tell you which build it is actually running, which turns a
+rollback into guesswork.
+
+Production images come from `.github/workflows/docker.yml` (default branch and
+`v*` tags); nightlies from `.github/workflows/nightly.yml` (a 02:00 UTC
+schedule, pushes to `dev` / `phase-*`, or a manual run). Both build
+`linux/amd64` and `linux/arm64`.
+
 ### Run standalone (no Raft)
 
 ```bash
