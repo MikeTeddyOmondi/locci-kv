@@ -35,7 +35,16 @@ jobs:
     # A scheduled run on a fork would push to the upstream registry.
     if: github.repository_owner == 'MikeTeddyOmondi'
     steps:
+      # A scheduled run fires on the default branch, and a bare checkout would
+      # take master with it — publishing a "nightly" built from released code.
+      # Development happens on phase-* branches, which change, so the branch to
+      # build on a schedule is a repo variable:
+      #   Settings → Secrets and variables → Actions → Variables
+      #   NIGHTLY_REF = phase-2
+      # Without it a scheduled run falls back to the default branch.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && (vars.NIGHTLY_REF || github.ref) || github.ref }}
 
       - uses: docker/setup-qemu-action@v3
 
@@ -115,6 +124,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && (vars.NIGHTLY_REF || github.ref) || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
