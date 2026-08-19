@@ -50,6 +50,40 @@ See [docs/PHASE_3_PERFORMANCE.md](docs/PHASE_3_PERFORMANCE.md) for optimization 
 
 ## Quick Start
 
+## Install
+
+### Download a binary
+
+Every `v*` tag publishes stripped binaries with SHA-256 checksums to
+[GitHub Releases](https://github.com/MikeTeddyOmondi/locci-kv/releases):
+
+| Platform | Asset |
+| -------- | ----- |
+| Linux x86_64  | `locci-kv-linux-amd64.tar.gz` |
+| Linux aarch64 | `locci-kv-linux-arm64.tar.gz` |
+| macOS Intel   | `locci-kv-darwin-amd64.tar.gz` |
+| macOS Apple silicon | `locci-kv-darwin-arm64.tar.gz` |
+
+```bash
+VERSION=v0.1.0          # pick a release
+ASSET=locci-kv-linux-amd64
+
+curl -fsSLO https://github.com/MikeTeddyOmondi/locci-kv/releases/download/$VERSION/$ASSET.tar.gz
+curl -fsSLO https://github.com/MikeTeddyOmondi/locci-kv/releases/download/$VERSION/$ASSET.tar.gz.sha256
+
+# Verify before running it
+shasum -a 256 -c $ASSET.tar.gz.sha256
+
+tar -xzf $ASSET.tar.gz
+sudo install -m 755 locci-kv /usr/local/bin/
+locci-kv --version
+```
+
+Release notes for each tag are generated on the release page; the curated
+history is in [CHANGELOG.md](CHANGELOG.md).
+
+### Build from source
+
 ### Build
 
 ```bash
