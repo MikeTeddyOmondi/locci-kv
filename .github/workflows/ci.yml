@@ -5,11 +5,13 @@ on:
     branches:
       - main
       - master
+      - dev
       - 'phase-*'
   pull_request:
     branches:
       - main
       - master
+      - dev
 
 env:
   CARGO_TERM_COLOR: always
