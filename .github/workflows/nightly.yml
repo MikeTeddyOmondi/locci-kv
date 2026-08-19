@@ -92,7 +92,7 @@ jobs:
   # Deliberately NOT run on every push — a four-target cross-compile per commit
   # is slow and almost always wasted. Scheduled and manual runs only.
   binaries:
-    name: nightly ${{ matrix.asset_name }}
+    name: nightly binaries
     if: >-
       github.repository_owner == 'MikeTeddyOmondi' &&
       (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
