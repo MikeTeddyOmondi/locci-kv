@@ -131,6 +131,25 @@ jobs:
             echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      # The curated notes live in CHANGELOG.md. Pull out the section for this
+      # tag rather than attaching the whole file, so the release page shows the
+      # changes for this version and nothing else.
+      - name: Extract release notes
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          BARE="${VERSION#v}"
+          awk -v v="$BARE" '
+            # Start at "## [x.y.z]" (or "## x.y.z"), stop at the next "## ".
+            $0 ~ "^## \\[?" v "\\]?" { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::warning::no CHANGELOG.md section for $BARE — falling back to generated notes"
+            echo "See the commit list below." > RELEASE_NOTES.md
+          fi
+          echo "--- release notes ---"; cat RELEASE_NOTES.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -138,6 +157,9 @@ jobs:
           name: Locci KV ${{ steps.version.outputs.VERSION }}
           draft: false
           prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
+          body_path: RELEASE_NOTES.md
+          # Appended below the curated notes — the commit and PR list is still
+          # useful, it just should not be the whole story.
           generate_release_notes: true
           files: |
             artifacts/**/*.tar.gz
