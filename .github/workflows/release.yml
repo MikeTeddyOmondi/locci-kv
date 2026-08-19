@@ -33,11 +33,6 @@ jobs:
             artifact_name: locci-kv
             asset_name: locci-kv-linux-arm64
 
-          # macOS x86_64
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            artifact_name: locci-kv
-            asset_name: locci-kv-darwin-amd64
 
           # macOS ARM64 (Apple Silicon)
           - target: aarch64-apple-darwin

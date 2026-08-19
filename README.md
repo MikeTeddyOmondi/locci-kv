@@ -61,7 +61,6 @@ Every `v*` tag publishes stripped binaries with SHA-256 checksums to
 | -------- | ----- |
 | Linux x86_64  | `locci-kv-linux-amd64.tar.gz` |
 | Linux aarch64 | `locci-kv-linux-arm64.tar.gz` |
-| macOS Intel   | `locci-kv-darwin-amd64.tar.gz` |
 | macOS Apple silicon | `locci-kv-darwin-arm64.tar.gz` |
 
 ```bash

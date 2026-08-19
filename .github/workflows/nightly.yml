@@ -107,9 +107,6 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             asset_name: locci-kv-linux-arm64
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            asset_name: locci-kv-darwin-amd64
           - target: aarch64-apple-darwin
             os: macos-latest
             asset_name: locci-kv-darwin-arm64
