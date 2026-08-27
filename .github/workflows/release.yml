@@ -1,0 +1,189 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.1.0)'
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: locci-kv
+            asset_name: locci-kv-linux-amd64
+
+          # Linux ARM64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: locci-kv
+            asset_name: locci-kv-linux-arm64
+
+
+          # macOS ARM64 (Apple Silicon)
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact_name: locci-kv
+            asset_name: locci-kv-darwin-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Install protobuf
+        run: |
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler libprotobuf-dev
+          else
+            brew install protobuf
+          fi
+
+      - name: Build
+        run: |
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+            export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+          fi
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Strip binary
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+          else
+            strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+          fi
+
+      - name: Strip binary (macOS)
+        if: matrix.os == 'macos-latest'
+        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+      - name: Create archive
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} dist/
+          cd dist
+          tar -czvf ${{ matrix.asset_name }}.tar.gz ${{ matrix.artifact_name }}
+          shasum -a 256 ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: |
+            dist/${{ matrix.asset_name }}.tar.gz
+            dist/${{ matrix.asset_name }}.tar.gz.sha256
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "VERSION=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      # Signatures, not just checksums: a .sha256 sitting beside the artifact
+      # proves it was not corrupted, not that we produced it — anyone who can
+      # replace the tarball can replace its checksum too.
+      - name: Import GPG signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_KEY }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent
+
+      - name: Sign release archives
+        env:
+          GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: |
+          # Artifacts land one directory deep per target, so sign in place
+          # rather than flattening and breaking the upload globs below.
+          find artifacts -name '*.tar.gz' -print0 | while IFS= read -r -d '' f; do
+            echo "signing $f"
+            echo "$GPG_PASSPHRASE" | gpg --batch --yes \
+              --passphrase-fd 0 \
+              --pinentry-mode loopback \
+              --detach-sign --armor "$f"
+          done
+
+      # The curated notes live in CHANGELOG.md. Pull out the section for this
+      # tag rather than attaching the whole file, so the release page shows the
+      # changes for this version and nothing else.
+      - name: Extract release notes
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          BARE="${VERSION#v}"
+          awk -v v="$BARE" '
+            # Start at "## [x.y.z]" (or "## x.y.z"), stop at the next "## ".
+            $0 ~ "^## \\[?" v "\\]?" { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::warning::no CHANGELOG.md section for $BARE — falling back to generated notes"
+            echo "See the commit list below." > RELEASE_NOTES.md
+          fi
+          echo "--- release notes ---"; cat RELEASE_NOTES.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: Locci KV ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
+          body_path: RELEASE_NOTES.md
+          # Appended below the curated notes — the commit and PR list is still
+          # useful, it just should not be the whole story.
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.sha256
+            artifacts/**/*.tar.gz.asc
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

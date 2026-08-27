@@ -1,0 +1,35 @@
+server:
+  id: 2
+  bind_addr: "0.0.0.0:8080"
+  data_dir: "/app/data"
+
+storage:
+  backend: "rocksdb"
+  rocksdb:
+    max_open_files: 1000
+    write_buffer_size: 67108864
+    max_write_buffer_number: 3
+    target_file_size_base: 67108864
+    enable_statistics: false
+
+raft:
+  heartbeat_tick: 2
+  election_tick: 10
+  max_size_per_msg: 1048576
+  max_inflight_msgs: 256
+  check_quorum: true
+  pre_vote: true
+
+cluster:
+  bootstrap: false
+  peers:
+    - id: 1
+      addr: "locci-node1:9001"
+    - id: 2
+      addr: "locci-node2:9001"
+    - id: 3
+      addr: "locci-node3:9001"
+
+logging:
+  level: "info"
+  format: "json"

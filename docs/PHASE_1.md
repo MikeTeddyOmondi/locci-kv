@@ -1179,7 +1179,7 @@ volumes:
 
 ```bash
 # Build image
-docker build -t locci-kv:latest .
+docker build -t locci/kv:latest .
 
 # Run container
 docker run -d \
@@ -1187,7 +1187,7 @@ docker run -d \
   -p 8080:8080 \
   -v $(pwd)/data:/data \
   -e LOCCI_SERVER_ID=1 \
-  locci-kv:latest
+  locci/kv:latest
 
 # View logs
 docker logs -f locci-kv

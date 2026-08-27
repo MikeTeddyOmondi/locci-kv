@@ -1,0 +1,179 @@
+# Nightly images from the active development branch, for testing against a real
+# cluster before a release.
+#
+# Tags every build `nightly-YYYYMMDD` and moves `nightly` to the newest. Pin the
+# dated tag in a cluster: `nightly` moves under you, and a Deployment that pulls
+# it cannot tell you which build it is running.
+#
+# Production images come from docker.yml — the default branch and `v*` tags.
+name: nightly
+
+on:
+  schedule:
+    # 02:00 UTC, after a day's merges have landed.
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - dev
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: locci/kv
+
+jobs:
+  docker:
+    name: docker locci/kv:nightly
+    runs-on: ubuntu-latest
+    # A scheduled run on a fork would push to the upstream registry.
+    if: github.repository_owner == 'MikeTeddyOmondi'
+    steps:
+      # A scheduled run fires on the default branch, and a bare checkout would
+      # take master with it — publishing a "nightly" built from released code.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=nightly-{{date 'YYYYMMDD'}}
+            type=raw,value=nightly
+            type=sha,prefix=nightly-,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          # arm64 as well as amd64: development happens on Apple silicon while
+          # test clusters and mini PCs are usually amd64.
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### Nightly image"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo
+            echo "Pin the dated tag in a cluster — \`nightly\` moves."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── Nightly binaries ────────────────────────────────────────────────────────
+  # Workflow artifacts rather than a release: these are throwaway builds for
+  # testing, and a rolling pre-release would clutter the releases page that
+  # `v*` tags own.
+  #
+  # Deliberately NOT run on every push — a four-target cross-compile per commit
+  # is slow and almost always wasted. Scheduled and manual runs only.
+  binaries:
+    name: nightly binaries
+    if: >-
+      github.repository_owner == 'MikeTeddyOmondi' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            asset_name: locci-kv-linux-amd64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            asset_name: locci-kv-linux-arm64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            asset_name: locci-kv-darwin-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Nightlies rebuild the same dependency tree every night; without a cache
+      # that is the bulk of the job.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Install protobuf
+        run: |
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler libprotobuf-dev
+          else
+            brew install protobuf
+          fi
+
+      - name: Build
+        run: |
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+            export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+          fi
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Strip binary
+        run: |
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/locci-kv
+          else
+            strip target/${{ matrix.target }}/release/locci-kv
+          fi
+
+      - name: Create archive
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/locci-kv dist/
+          cd dist
+          # Stamped with the date and commit so a downloaded binary can be
+          # traced back to what built it.
+          NAME="${{ matrix.asset_name }}-nightly-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
+          tar -czf "$NAME.tar.gz" locci-kv
+          shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}-nightly
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          # Long enough to test a build, short enough not to accumulate.
+          retention-days: 14

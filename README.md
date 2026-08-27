@@ -2,8 +2,9 @@
 
 A distributed key-value store built on Raft consensus with RocksDB as the storage backend.
 
-## Features (Phase 1 MVP)
+## Features
 
+### Phase 1 (Standalone)
 - ✅ RocksDB storage backend
 - ✅ HTTP REST API
 - ✅ Configuration via CLI, ENV vars, and YAML
@@ -12,7 +13,93 @@ A distributed key-value store built on Raft consensus with RocksDB as the storag
 - ✅ Key listing
 - ✅ Storage statistics
 
+### Phase 2 (Raft Consensus)
+- ✅ Raft consensus via raft-rs
+- ✅ Leader election with pre-vote
+- ✅ Log replication across nodes
+- ✅ Leader failover
+- ✅ TCP transport for Raft messages
+- ✅ Proposal system with timeout handling
+- ✅ `/raft/status` endpoint
+
+### Phase 3 (Performance) - In Progress
+- ⬜ Event loop optimization
+- ⬜ Proposal batching
+- ⬜ gRPC transport
+- ⬜ Snapshots & log compaction
+
+## Performance
+
+Current benchmarks (3-node cluster, 50 connections):
+
+| Mode | Write RPS | Read RPS | Write p99 |
+|------|-----------|----------|-----------|
+| Standalone | ~52K | ~56K | 3ms |
+| Raft Single | ~500 | ~62K | 102ms |
+| Raft Cluster (3) | ~250 | ~61K | 202ms |
+
+**Phase 3 targets**: 50K+ writes/sec with <5ms p99 latency.
+
+Run benchmarks:
+```bash
+cargo install rewrk
+./benches/bench-compare.sh
+```
+
+See [docs/PHASE_3_PERFORMANCE.md](docs/PHASE_3_PERFORMANCE.md) for optimization details.
+
 ## Quick Start
+
+## Install
+
+### Download a binary
+
+Every `v*` tag publishes stripped binaries with SHA-256 checksums to
+[GitHub Releases](https://github.com/MikeTeddyOmondi/locci-kv/releases):
+
+| Platform | Asset |
+| -------- | ----- |
+| Linux x86_64  | `locci-kv-linux-amd64.tar.gz` |
+| Linux aarch64 | `locci-kv-linux-arm64.tar.gz` |
+| macOS Apple silicon | `locci-kv-darwin-arm64.tar.gz` |
+
+```bash
+VERSION=v0.1.0          # pick a release
+ASSET=locci-kv-linux-amd64
+
+curl -fsSLO https://github.com/MikeTeddyOmondi/locci-kv/releases/download/$VERSION/$ASSET.tar.gz
+curl -fsSLO https://github.com/MikeTeddyOmondi/locci-kv/releases/download/$VERSION/$ASSET.tar.gz.sha256
+
+# Verify before running it
+shasum -a 256 -c $ASSET.tar.gz.sha256
+
+tar -xzf $ASSET.tar.gz
+sudo install -m 755 locci-kv /usr/local/bin/
+locci-kv --version
+```
+
+Release notes on each release page come from that version's section of
+[CHANGELOG.md](CHANGELOG.md), with the commit list appended.
+
+### Nightly builds
+
+Untagged builds of the development branch, for testing before a release.
+
+- **Images**: `locci/kv:nightly-YYYYMMDD` on Docker Hub (see below).
+- **Binaries**: workflow artifacts on the scheduled or manually dispatched
+  [nightly runs](https://github.com/MikeTeddyOmondi/locci-kv/actions/workflows/nightly.yml),
+  kept for 14 days:
+
+  ```bash
+  gh run download --repo MikeTeddyOmondi/locci-kv \
+    --name locci-kv-linux-amd64-nightly
+  ```
+
+  Archives are stamped `…-nightly-YYYYMMDD-<sha>` so a binary traces back to the
+  commit that produced it. They are not built on every push — only on the
+  schedule and on manual dispatch.
+
+### Build from source
 
 ### Build
 
@@ -20,10 +107,58 @@ A distributed key-value store built on Raft consensus with RocksDB as the storag
 cargo build --release
 ```
 
-### Run with defaults
+### Run with Docker
+
+```bash
+docker run -d --name locci-kv \
+  -p 8080:8080 \
+  -v locci-kv-data:/data \
+  -e LOCCI_KV_BIND_ADDR=0.0.0.0:8080 \
+  -e LOCCI_KV_DATA_DIR=/data \
+  locci/kv:latest
+```
+
+The volume matters: without it the RocksDB store lives in the container's
+writable layer and is lost on every recreate.
+
+#### Image tags
+
+Published to Docker Hub as `locci/kv`.
+
+| Tag                | Built from            | Use for |
+| ------------------ | --------------------- | ------- |
+| `latest`           | default branch        | Tracking the tip. Moves. |
+| `vX.Y.Z`, `vX.Y`, `vX` | `v*` git tags     | **Production.** Immutable. |
+| `nightly-YYYYMMDD` | development branches  | Testing a specific day's build against a cluster. Immutable. |
+| `nightly`          | development branches  | Convenience. Moves — do not pin it. |
+| `<sha>`            | any build             | Reproducing one exact commit. |
+
+Pin a dated or semver tag in a cluster. A Deployment pulling `latest` or
+`nightly` cannot tell you which build it is actually running, which turns a
+rollback into guesswork.
+
+Production images come from `.github/workflows/docker.yml` (default branch and
+`v*` tags); nightlies from `.github/workflows/nightly.yml` (a 02:00 UTC
+schedule, pushes to `dev` / `phase-*`, or a manual run). Both build
+`linux/amd64` and `linux/arm64`.
+
+### Run standalone (no Raft)
 
 ```bash
 ./target/release/locci-kv start
+```
+
+### Run with Raft (3-node cluster)
+
+```bash
+# Terminal 1 - Bootstrap node 1
+./target/release/locci-kv --enable-raft --config node1.yaml start --bootstrap
+
+# Terminal 2 - Node 2
+./target/release/locci-kv --enable-raft --config node2.yaml start
+
+# Terminal 3 - Node 3
+./target/release/locci-kv --enable-raft --config node3.yaml start
 ```
 
 ### Run with custom config
@@ -45,10 +180,10 @@ cargo build --release
 ### Run with environment variables
 
 ```bash
-export LOCCI_CONFIG=config.yaml
-export LOCCI_SERVER_ID=1
-export LOCCI_BIND_ADDR=127.0.0.1:8080
-export LOCCI_DATA_DIR=./data
+export LOCCI_KV_CONFIG=config.yaml
+export LOCCI_KV_SERVER_ID=1
+export LOCCI_KV_BIND_ADDR=127.0.0.1:8080
+export LOCCI_KV_DATA_DIR=./data
 
 ./target/release/locci-kv start
 ```
@@ -87,10 +222,29 @@ curl -X DELETE http://localhost:8080/kv/mykey
 curl http://localhost:8080/keys
 ```
 
+### List keys by prefix
+
+Scoped listing seeks directly to the prefix instead of scanning the whole store,
+so latency scales with the number of matching keys rather than the store size.
+
+```bash
+curl http://localhost:8080/keys/locci-functions:proj_xyz
+```
+
+The prefix is a byte prefix, not a path segment — `proj_xyz` also matches
+`proj_xyzzy`. URL-encode any `/` in the prefix (`%2F`).
+
 ### Get storage statistics
 
 ```bash
 curl http://localhost:8080/stats
+```
+
+### Get Raft status (Phase 2)
+
+```bash
+curl http://localhost:8081/raft/status
+# {"enabled":true,"is_leader":true,"leader_id":1}
 ```
 
 ## Configuration
@@ -121,6 +275,25 @@ storage:
 logging:
   level: "info"
   format: "json"
+
+# Phase 2: Raft configuration
+raft:
+  heartbeat_tick: 2
+  election_tick: 10
+  max_size_per_msg: 1048576
+  max_inflight_msgs: 256
+  check_quorum: true
+  pre_vote: true
+
+cluster:
+  bootstrap: false
+  peers:
+    - id: 1
+      addr: "127.0.0.1:9001"
+    - id: 2
+      addr: "127.0.0.1:9002"
+    - id: 3
+      addr: "127.0.0.1:9003"
 ```
 
 ## Development
@@ -151,6 +324,7 @@ cargo clippy
 
 ## Architecture
 
+### Phase 1 (Standalone)
 ```
 ┌─────────────────────────────────────────┐
 │          HTTP API (Axum)                │
@@ -158,6 +332,22 @@ cargo clippy
 │         Storage Interface               │
 ├─────────────────────────────────────────┤
 │      RocksDB Storage Backend            │
+└─────────────────────────────────────────┘
+```
+
+### Phase 2 (Raft Cluster)
+```
+┌─────────────────────────────────────────┐
+│          HTTP API (Axum)                │
+├─────────────────────────────────────────┤
+│     Raft Layer (Leader Election,        │
+│     Log Replication, Consensus)         │
+├─────────────────────────────────────────┤
+│         Storage Interface               │
+├─────────────────────────────────────────┤
+│      RocksDB Storage Backend            │
+├─────────────────────────────────────────┤
+│     TCP Transport (Raft Messages)       │
 └─────────────────────────────────────────┘
 ```
 
@@ -170,21 +360,30 @@ cargo clippy
   - [x] HTTP REST API
   - [x] Basic CRUD operations
 
-- [ ] Phase 2: Raft Integration
-  - [ ] Integrate raft-rs
-  - [ ] Consensus for writes
-  - [ ] Leader election
+- [x] Phase 2: Raft Integration
+  - [x] Integrate raft-rs
+  - [x] Consensus for writes
+  - [x] Leader election with pre-vote
+  - [x] TCP transport for Raft messages
+  - [x] Log replication
+  - [x] Leader failover
+  - [x] Raft status endpoint
 
-- [ ] Phase 3: Multi-Node Cluster
-  - [ ] Cluster configuration
-  - [ ] Node join/leave
-  - [ ] Replication
+- [ ] Phase 3: Performance & Production
+  - [ ] Event loop optimization (decouple ticks from proposals)
+  - [ ] Proposal batching (accumulate writes)
+  - [ ] Async disk pipeline (fsync batching)
+  - [ ] gRPC transport with connection pooling
+  - [ ] Snapshots & log compaction
+  - [ ] Linearizable reads (lease-based)
 
-- [ ] Phase 4: Production Features
-  - [ ] Connection pooling
-  - [ ] Metrics & monitoring
+- [ ] Phase 4: Operations & Scale
+  - [ ] Prometheus metrics
+  - [ ] Dynamic membership changes
+  - [ ] TLS/mTLS support
   - [ ] Backup & restore
+  - [ ] Multi-region support
 
 ## License
 
-Apache-2.0
+[Apache-2.0](./LICENSE)

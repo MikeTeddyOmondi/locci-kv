@@ -1,12 +1,14 @@
+use crate::error::{LocciKVError, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use crate::error::{LocciKVError, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
     pub storage: StorageConfig,
     pub logging: LoggingConfig,
+    pub raft: RaftConfig,
+    pub cluster: ClusterConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +39,28 @@ pub struct LoggingConfig {
     pub format: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaftConfig {
+    pub heartbeat_tick: usize,
+    pub election_tick: usize,
+    pub max_size_per_msg: u64,
+    pub max_inflight_msgs: usize,
+    pub check_quorum: bool,
+    pub pre_vote: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerConfig {
+    pub id: u64,
+    pub addr: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterConfig {
+    pub peers: Vec<PeerConfig>,
+    pub bootstrap: bool,
+}
+
 impl Config {
     /// Load configuration with priority: CLI > ENV > Config File > Defaults
     pub fn load(config_path: Option<String>) -> Result<Self> {
@@ -47,7 +71,7 @@ impl Config {
         if let Some(path) = config_path {
             let contents = std::fs::read_to_string(&path)
                 .map_err(|e| LocciKVError::Config(format!("Failed to read config file: {}", e)))?;
-            
+
             config = serde_yaml::from_str(&contents)
                 .map_err(|e| LocciKVError::Config(format!("Failed to parse config file: {}", e)))?;
         }
@@ -56,7 +80,12 @@ impl Config {
     }
 
     /// Merge CLI overrides into the config
-    pub fn merge_overrides(&mut self, id: Option<u64>, bind_addr: Option<String>, data_dir: Option<PathBuf>) {
+    pub fn merge_overrides(
+        &mut self,
+        id: Option<u64>,
+        bind_addr: Option<String>,
+        data_dir: Option<PathBuf>,
+    ) {
         if let Some(id) = id {
             self.server.id = id;
         }
@@ -90,6 +119,21 @@ impl Default for Config {
             logging: LoggingConfig {
                 level: "info".to_string(),
                 format: "json".to_string(),
+            },
+            raft: RaftConfig {
+                heartbeat_tick: 100,
+                election_tick: 300,
+                max_size_per_msg: 1024 * 1024,
+                max_inflight_msgs: 256,
+                check_quorum: true,
+                pre_vote: true,
+            },
+            cluster: ClusterConfig {
+                peers: vec![PeerConfig {
+                    id: 1,
+                    addr: "127.0.0.1:9001".to_string(),
+                }],
+                bootstrap: false,
             },
         }
     }

@@ -1,0 +1,38 @@
+# Build artifacts
+target/
+**/*.rs.bk
+
+# Environment and config
+**/*.env
+.env.sample
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+**/.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Docker
+.dockerignore
+docker/
+
+# Documentation (not needed in image)
+docs/
+*.md
+!README.md
+
+# Tests and benchmarks
+tests/
+benches/
+
+# CI/CD
+.github/
+
+# Misc
+Justfile
+LICENSE

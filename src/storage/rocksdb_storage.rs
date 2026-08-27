@@ -1,11 +1,11 @@
+use super::{Storage, StorageStats};
+use crate::config::RocksDBConfig;
+use crate::error::Result;
 use async_trait::async_trait;
-use rocksdb::{DB, Options, IteratorMode};
+use rocksdb::{Direction, IteratorMode, Options, DB};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::config::RocksDBConfig;
-use crate::error::Result;
-use super::{Storage, StorageStats};
 
 pub struct RocksDBStorage {
     db: Arc<RwLock<DB>>,
@@ -19,7 +19,7 @@ impl RocksDBStorage {
         opts.set_write_buffer_size(config.write_buffer_size);
         opts.set_max_write_buffer_number(config.max_write_buffer_number);
         opts.set_target_file_size_base(config.target_file_size_base);
-        
+
         if config.enable_statistics {
             opts.enable_statistics();
         }
@@ -63,18 +63,25 @@ impl Storage for RocksDBStorage {
         let db = self.db.read().await;
         let mut keys = Vec::new();
 
-        let iter = db.iterator(IteratorMode::Start);
-        
-        for item in iter {
-            let (key, _) = item?;
-            
-            // Filter by prefix if provided
-            if let Some(p) = prefix {
-                if key.starts_with(p) {
+        match prefix {
+            // Seek straight to the prefix and stop at the first key past it,
+            // so cost scales with the matching range rather than the store.
+            Some(p) => {
+                let iter = db.iterator(IteratorMode::From(p, Direction::Forward));
+                for item in iter {
+                    let (key, _) = item?;
+                    if !key.starts_with(p) {
+                        break;
+                    }
                     keys.push(key.to_vec());
                 }
-            } else {
-                keys.push(key.to_vec());
+            }
+            None => {
+                let iter = db.iterator(IteratorMode::Start);
+                for item in iter {
+                    let (key, _) = item?;
+                    keys.push(key.to_vec());
+                }
             }
         }
 
@@ -83,7 +90,7 @@ impl Storage for RocksDBStorage {
 
     async fn stats(&self) -> Result<StorageStats> {
         let db = self.db.read().await;
-        
+
         // Count keys and estimate size
         let mut total_keys = 0u64;
         let mut total_size = 0u64;
